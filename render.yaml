@@ -3,8 +3,8 @@ services:
     name: cvperfect-frontend
     rootDir: .
     env: node
-    buildCommand: npm install && npm run build
-    startCommand: npm run start
+    buildCommand: npm --prefix frontend install && npm --prefix frontend run build
+    startCommand: npm --prefix frontend run start
     plan: free
     envVars:
       - key: NODE_VERSION
