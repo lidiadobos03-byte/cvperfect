@@ -152,6 +152,18 @@ function EF({ value, onChange, multiline, style, placeholder }) {
   return <input ref={ref} type="text" value={safeValue} placeholder={placeholder} onChange={e => onChange(e.target.value)} onFocus={() => setActive(true)} onBlur={() => setActive(false)} style={{ ...base, width: "100%", display: "inline-block", boxSizing: "border-box" }} />;
 }
 
+function EditableText({ value, onChange, style, placeholder, editMode }) {
+  return editMode
+    ? <EF value={value} onChange={onChange} style={style} placeholder={placeholder} />
+    : <span style={style}>{value}</span>;
+}
+
+function EditableTextMulti({ value, onChange, style, placeholder, editMode }) {
+  return editMode
+    ? <EF value={value} onChange={onChange} multiline style={style} placeholder={placeholder} />
+    : <span style={style}>{value}</span>;
+}
+
 // ─── CV DOCUMENT ──────────────────────────────────────────────────────────────
 function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode, lang }) {
   const skillWidths = useRef({});
@@ -159,16 +171,6 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
   const set = (k, v) => setCvData(p => ({ ...p, [k]: v }));
   const setN = (arr, i, f, v) => setCvData(p => { const a = JSON.parse(JSON.stringify(p[arr])); a[i][f] = v; return { ...p, [arr]: a }; });
   const setL = (arr, i, v) => setCvData(p => { const a = [...p[arr]]; a[i] = v; return { ...p, [arr]: a }; });
-  const E = ({ v, onCh, style, ph }) => (
-    editMode
-      ? <EF value={v} onChange={onCh} style={style} placeholder={ph} />
-      : <span style={style}>{v}</span>
-  );
-  const EM = ({ v, onCh, style, ph }) => (
-    editMode
-      ? <EF value={v} onChange={onCh} multiline style={style} placeholder={ph} />
-      : <span style={style}>{v}</span>
-  );
   const labels = lang === "en"
     ? { profil: "Professional Profile", exp: "Professional Experience", edu: "Education", comp: "Skills", limbi: "Languages", cert: "Certifications" }
     : { profil: "Profil Profesional", exp: "Experiență Profesională", edu: "Educație", comp: "Competențe", limbi: "Limbi Străine", cert: "Certificări" };
@@ -185,31 +187,31 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
               </div>}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <E v={cvData.nume} onCh={v => set("nume", v)} style={{ display: "block", color: "#fff", fontSize: 25, fontWeight: 700, letterSpacing: "-0.3px" }} />
-          <E v={cvData.titlu} onCh={v => set("titlu", v)} style={{ display: "block", color: "rgba(255,255,255,0.88)", fontSize: 13.5, fontWeight: 500, marginTop: 4 }} />
+          <EditableText value={cvData.nume} onChange={v => set("nume", v)} editMode={editMode} style={{ display: "block", color: "#fff", fontSize: 25, fontWeight: 700, letterSpacing: "-0.3px" }} />
+          <EditableText value={cvData.titlu} onChange={v => set("titlu", v)} editMode={editMode} style={{ display: "block", color: "rgba(255,255,255,0.88)", fontSize: 13.5, fontWeight: 500, marginTop: 4 }} />
           <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 10, fontSize: 11.5, color: "rgba(255,255,255,0.88)" }}>
-            <span>📧 <E v={cvData.email} onCh={v => set("email", v)} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
-            <span>📞 <E v={cvData.telefon} onCh={v => set("telefon", v)} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
-            <span>📍 <E v={cvData.oras} onCh={v => set("oras", v)} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
-            <span>🔗 <E v={cvData.linkedin} onCh={v => set("linkedin", v)} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
+            <span>📧 <EditableText value={cvData.email} onChange={v => set("email", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
+            <span>📞 <EditableText value={cvData.telefon} onChange={v => set("telefon", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
+            <span>📍 <EditableText value={cvData.oras} onChange={v => set("oras", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
+            <span>🔗 <EditableText value={cvData.linkedin} onChange={v => set("linkedin", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
           </div>
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 258px" }}>
         <div style={{ padding: "22px 26px 22px 42px" }}>
           <Sec title={labels.profil} color={color}>
-            <EM v={cvData.despre} onCh={v => set("despre", v)} style={{ fontSize: 13, lineHeight: 1.7, color: "#444", display: "block", width: "100%" }} ph="Profil profesional..." />
+            <EditableTextMulti value={cvData.despre} onChange={v => set("despre", v)} editMode={editMode} style={{ fontSize: 13, lineHeight: 1.7, color: "#444", display: "block", width: "100%" }} placeholder="Profil profesional..." />
           </Sec>
           <Sec title={labels.exp} color={color}>
             {cvData.experienta.map((exp, i) => (
               <div key={i} style={{ marginBottom: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <E v={exp.rol} onCh={v => setN("experienta", i, "rol", v)} style={{ display: "block", fontWeight: 700, fontSize: 13.5, color: "#111" }} />
-                    <E v={exp.firma} onCh={v => setN("experienta", i, "firma", v)} style={{ display: "block", color, fontWeight: 600, fontSize: 12.5 }} />
+                    <EditableText value={exp.rol} onChange={v => setN("experienta", i, "rol", v)} editMode={editMode} style={{ display: "block", fontWeight: 700, fontSize: 13.5, color: "#111" }} />
+                    <EditableText value={exp.firma} onChange={v => setN("experienta", i, "firma", v)} editMode={editMode} style={{ display: "block", color, fontWeight: 600, fontSize: 12.5 }} />
                   </div>
                   <div style={{ background: color, color: "#fff", padding: "2px 9px", borderRadius: 20, fontSize: 11, whiteSpace: "nowrap", flexShrink: 0, alignSelf: "flex-start" }}>
-                    <E v={exp.perioada} onCh={v => setN("experienta", i, "perioada", v)} style={{ color: "#fff" }} />
+                    <EditableText value={exp.perioada} onChange={v => setN("experienta", i, "perioada", v)} editMode={editMode} style={{ color: "#fff" }} />
                   </div>
                 </div>
                 {editMode
@@ -222,10 +224,10 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
             {cvData.educatie.map((edu, i) => (
               <div key={i} style={{ marginBottom: 10, display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <div style={{ flex: 1 }}>
-                  <E v={edu.diploma} onCh={v => setN("educatie", i, "diploma", v)} style={{ display: "block", fontWeight: 700, fontSize: 13 }} />
-                  <E v={edu.institutie} onCh={v => setN("educatie", i, "institutie", v)} style={{ display: "block", color, fontSize: 12.5 }} />
+                  <EditableText value={edu.diploma} onChange={v => setN("educatie", i, "diploma", v)} editMode={editMode} style={{ display: "block", fontWeight: 700, fontSize: 13 }} />
+                  <EditableText value={edu.institutie} onChange={v => setN("educatie", i, "institutie", v)} editMode={editMode} style={{ display: "block", color, fontSize: 12.5 }} />
                 </div>
-                <E v={edu.perioada} onCh={v => setN("educatie", i, "perioada", v)} style={{ fontSize: 11.5, color: "#888", whiteSpace: "nowrap", flexShrink: 0 }} />
+                <EditableText value={edu.perioada} onChange={v => setN("educatie", i, "perioada", v)} editMode={editMode} style={{ fontSize: 11.5, color: "#888", whiteSpace: "nowrap", flexShrink: 0 }} />
               </div>
             ))}
           </Sec>
