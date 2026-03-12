@@ -15,20 +15,120 @@ function useHtml2pdf() {
   return ready;
 }
 
-// ─── Anthropic AI call ────────────────────────────────────────────────────────
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://cvperfect-backend.onrender.com";
+
+// ─── Anthropic AI call — prin backend (CORS fix) ─────────────────────────────
 async function callAI(systemPrompt, userPrompt) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch(`${API_URL}/ai`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userPrompt }]
-    })
+    body: JSON.stringify({ systemPrompt, userPrompt })
   });
+  if (!res.ok) throw new Error(`AI error: ${res.status}`);
   const data = await res.json();
-  return data.content?.[0]?.text || "";
+  return data.text || "";
+}
+
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+
+// ─── STRIPE PAYMENT HOOK ──────────────────────────────────────────────────────
+function useStripePayment() {
+  const [paid, setPaid] = useState(false);
+  const [checking, setChecking] = useState(false);
+
+  // La load, verifică dacă userul vine înapoi de la Stripe cu ?payment=success
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const payment = params.get("payment");
+    const sessionId = params.get("session_id");
+
+    if (payment === "success" && sessionId) {
+      setChecking(true);
+      fetch(`${API_URL}/verify-payment?session_id=${sessionId}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.paid) {
+            setPaid(true);
+            // Curăță URL-ul
+            window.history.replaceState({}, "", window.location.pathname);
+          }
+        })
+        .catch(console.error)
+        .finally(() => setChecking(false));
+    }
+  }, []);
+
+  const startPayment = async (templateName, lang) => {
+    try {
+      const res = await fetch(`${API_URL}/create-checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ templateName, lang })
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url; // redirect la Stripe Checkout
+      } else {
+        alert("Eroare la inițierea plății. Încearcă din nou.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Nu s-a putut conecta la server. Verifică conexiunea.");
+    }
+  };
+
+  return { paid, setPaid, checking, startPayment };
+}
+
+// ─── PAYWALL MODAL ────────────────────────────────────────────────────────────
+function PaywallModal({ onClose, onPay, templateName, lang, color }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.7)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "#fff", borderRadius: 20, padding: 32, maxWidth: 420, width: "100%", boxShadow: "0 24px 64px rgba(0,0,0,0.25)", position: "relative" }}>
+        {/* Close */}
+        <button onClick={onClose} style={{ position: "absolute", top: 16, right: 16, background: "#f1f5f9", border: "none", width: 32, height: 32, borderRadius: "50%", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+
+        {/* Icon */}
+        <div style={{ width: 64, height: 64, borderRadius: 16, background: `linear-gradient(135deg, ${color}, #7c3aed)`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", fontSize: 30 }}>📄</div>
+
+        {/* Title */}
+        <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 800, color: "#0f172a", textAlign: "center" }}>Descarcă CV-ul tău</h2>
+        <p style={{ margin: "0 0 24px", fontSize: 14, color: "#64748b", textAlign: "center", lineHeight: 1.6 }}>
+          CV-ul tău profesional <strong>{templateName}</strong> ({lang === "en" ? "Engleză 🇬🇧" : "Română 🇷🇴"}) este gata de descărcat.
+        </p>
+
+        {/* Price box */}
+        <div style={{ background: "linear-gradient(135deg, #f0f9ff, #eff6ff)", border: "1.5px solid #bfdbfe", borderRadius: 14, padding: "20px 24px", marginBottom: 20, textAlign: "center" }}>
+          <div style={{ fontSize: 13, color: "#64748b", marginBottom: 4 }}>Preț descărcare</div>
+          <div style={{ fontSize: 42, fontWeight: 900, color: "#0f172a", letterSpacing: "-1px" }}>19 <span style={{ fontSize: 22 }}>RON</span></div>
+          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>plată unică · fără abonament</div>
+        </div>
+
+        {/* Benefits */}
+        <div style={{ marginBottom: 24 }}>
+          {[
+            "✅ PDF profesional format A4 european",
+            "✅ Optimizat ATS — trecut prin filtre HR",
+            "✅ Descărcare instant după plată",
+            "✅ Plată securizată prin Stripe 🔒",
+          ].map((b, i) => (
+            <div key={i} style={{ fontSize: 13, color: "#374151", marginBottom: 8 }}>{b}</div>
+          ))}
+        </div>
+
+        {/* Pay button */}
+        <button onClick={onPay}
+          style={{ width: "100%", padding: "14px", borderRadius: 12, background: `linear-gradient(135deg, ${color}, #7c3aed)`, color: "#fff", border: "none", cursor: "pointer", fontWeight: 800, fontSize: 16, boxShadow: `0 6px 20px ${color}50`, marginBottom: 12 }}>
+          💳 Plătește 19 RON & Descarcă
+        </button>
+
+        <p style={{ margin: 0, fontSize: 11, color: "#94a3b8", textAlign: "center" }}>
+          🔒 Plată securizată prin Stripe · Visa, Mastercard, Google Pay
+        </p>
+      </div>
+    </div>
+  );
 }
 
 // ─── 18 CV TEMPLATES ─────────────────────────────────────────────────────────
@@ -388,16 +488,18 @@ const fBtn = { width: "100%", padding: "9px 14px", borderRadius: 9, cursor: "poi
 
 export default function App() {
   const pdfReady = useHtml2pdf();
+  const { paid, setPaid, checking, startPayment } = useStripePayment();
   const [tmpl, setTmpl] = useState(null);
-  const [cvRO, setCvRO] = useState(null);   // Romanian version
-  const [cvEN, setCvEN] = useState(null);   // English version (after translate)
-  const [lang, setLang] = useState("ro");   // "ro" | "en"
+  const [cvRO, setCvRO] = useState(null);
+  const [cvEN, setCvEN] = useState(null);
+  const [lang, setLang] = useState("ro");
   const [photo, setPhoto] = useState(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState("grid");
   const [editMode, setEditMode] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [showPaywall, setShowPaywall] = useState(false);
   const fileRef = useRef();
 
   const cvData = lang === "en" && cvEN ? cvEN : cvRO;
@@ -439,8 +541,49 @@ export default function App() {
     setExporting(false);
   };
 
+  // Dacă e plătit → descarcă direct. Dacă nu → arată paywall
+  const handleDownloadClick = () => {
+    if (paid) {
+      exportPDF();
+    } else {
+      setShowPaywall(true);
+    }
+  };
+
+  const handlePayNow = () => {
+    setShowPaywall(false);
+    startPayment(tmpl?.job || "CV", lang);
+  };
+
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #f0f4ff 0%, #faf8ff 100%)", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+
+      {/* ── PAYWALL MODAL ── */}
+      {showPaywall && tmpl && (
+        <PaywallModal
+          onClose={() => setShowPaywall(false)}
+          onPay={handlePayNow}
+          templateName={tmpl.job}
+          lang={lang}
+          color={tmpl.color}
+        />
+      )}
+
+      {/* ── SUCCESS BANNER (după plată) ── */}
+      {paid && (
+        <div style={{ background: "linear-gradient(90deg, #059669, #0d9488)", padding: "10px 20px", textAlign: "center" }}>
+          <span style={{ fontSize: 14, color: "#fff", fontWeight: 700 }}>
+            🎉 Plată confirmată! Poți descărca CV-ul oricând. Apasă butonul PDF din dreapta.
+          </span>
+        </div>
+      )}
+
+      {/* ── CHECKING PAYMENT ── */}
+      {checking && (
+        <div style={{ background: "#fef9c3", padding: "10px 20px", textAlign: "center" }}>
+          <span style={{ fontSize: 13, color: "#854d0e", fontWeight: 600 }}>⏳ Se verifică plata...</span>
+        </div>
+      )}
 
       {/* ── NAVBAR ── */}
       <header style={{ background: "#fff", borderBottom: "1px solid #e8ecf4", position: "sticky", top: 0, zIndex: 999, boxShadow: "0 2px 14px rgba(0,0,0,0.07)" }}>
@@ -473,9 +616,9 @@ export default function App() {
                 {editMode ? "👁 Preview" : "✏️ Editează"}
               </button>
               {editMode && <button onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 2000); }} style={nb(saved ? "#059669" : "#bbf7d0", saved ? "#059669" : "#f0fdf4", saved ? "#fff" : "#059669", 700)}>{saved ? "✓ Salvat!" : "💾 Salvează"}</button>}
-              <button onClick={exportPDF} disabled={exporting}
-                style={{ padding: "7px 16px", borderRadius: 8, background: exporting ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", cursor: exporting ? "not-allowed" : "pointer", fontWeight: 800, fontSize: 12.5, boxShadow: exporting ? "none" : `0 3px 10px ${tmpl.color}44` }}>
-                {exporting ? "⏳..." : `⬇️ PDF ${lang.toUpperCase()}`}
+              <button onClick={handleDownloadClick} disabled={exporting}
+                style={{ padding: "7px 16px", borderRadius: 8, background: paid ? "linear-gradient(135deg,#059669,#0d9488)" : exporting ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", cursor: exporting ? "not-allowed" : "pointer", fontWeight: 800, fontSize: 12.5, boxShadow: exporting ? "none" : `0 3px 10px ${tmpl.color}44` }}>
+                {exporting ? "⏳..." : paid ? `⬇️ PDF ${lang.toUpperCase()} ✓` : `🔒 PDF ${lang.toUpperCase()} — 19 RON`}
               </button>
             </div>
           )}
@@ -566,9 +709,9 @@ export default function App() {
                   {editMode ? "👁 Ieși din editare" : "✏️ Editează CV-ul"}
                 </button>
 
-                <button onClick={exportPDF} disabled={exporting}
-                  style={{ ...fBtn, padding: "12px", background: exporting ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", fontWeight: 800, fontSize: 14, cursor: exporting ? "not-allowed" : "pointer", boxShadow: exporting ? "none" : `0 4px 14px ${tmpl.color}44` }}>
-                  {exporting ? "⏳ Generare PDF..." : `⬇️ Descarcă PDF ${lang.toUpperCase()}`}
+                <button onClick={handleDownloadClick} disabled={exporting}
+                  style={{ ...fBtn, padding: "12px", background: paid ? "linear-gradient(135deg,#059669,#0d9488)" : exporting ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", fontWeight: 800, fontSize: 14, cursor: exporting ? "not-allowed" : "pointer", boxShadow: exporting ? "none" : `0 4px 14px ${tmpl.color}44` }}>
+                  {exporting ? "⏳ Generare PDF..." : paid ? `⬇️ Descarcă PDF ${lang.toUpperCase()} (plătit ✓)` : `🔒 Descarcă PDF — 19 RON`}
                 </button>
 
                 {cvEN && (

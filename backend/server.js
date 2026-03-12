@@ -73,6 +73,102 @@ app.post(
 // Pentru restul API-ului folosim JSON normal
 app.use(express.json({ limit: "1mb" }));
 
+// ─── POST /create-checkout ────────────────────────────────────────────────────
+app.post("/create-checkout", async (req, res) => {
+  try {
+    const stripe = getStripeClient();
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price_data: {
+            currency: "ron",
+            product_data: {
+              name: "CVPerfect — PDF CV",
+            },
+            unit_amount: 1900,
+          },
+          quantity: 1,
+        },
+      ],
+      success_url: `${frontendUrl}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${frontendUrl}/?payment=cancel`,
+      metadata: {
+        templateName: req.body?.templateName || "CV",
+        lang: req.body?.lang || "ro",
+      },
+    });
+
+    res.json({ url: session.url });
+  } catch (error) {
+    console.error("Stripe session error:", error);
+    res.status(500).json({ error: "Stripe session error" });
+  }
+});
+
+// ─── GET /verify-payment?session_id=xxx ──────────────────────────────────────
+app.get("/verify-payment", async (req, res) => {
+  try {
+    const sessionId = req.query.session_id;
+    if (!sessionId || typeof sessionId !== "string") {
+      return res.status(400).json({ error: "Missing session_id" });
+    }
+
+    const stripe = getStripeClient();
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const paid = session.payment_status === "paid";
+    res.json({ paid });
+  } catch (error) {
+    console.error("Verify payment error:", error);
+    res.status(500).json({ error: "Verify payment error" });
+  }
+});
+
+// ─── POST /ai ────────────────────────────────────────────────────────────────
+app.post("/ai", async (req, res) => {
+  try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return res.status(400).json({ error: "Missing ANTHROPIC_API_KEY" });
+    }
+
+    const { systemPrompt, userPrompt } = req.body || {};
+    if (!systemPrompt || !userPrompt) {
+      return res.status(400).json({ error: "Missing prompts" });
+    }
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20240620",
+        max_tokens: 900,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userPrompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("Anthropic error:", errText);
+      return res.status(500).json({ error: "AI provider error" });
+    }
+
+    const data = await response.json();
+    const text = data?.content?.[0]?.text || "";
+    res.json({ text });
+  } catch (error) {
+    console.error("AI error:", error);
+    res.status(500).json({ error: "AI error" });
+  }
+});
+
 // Exemplu de endpoint
 app.get("/", (_req, res) => {
   res.send("Server running");
