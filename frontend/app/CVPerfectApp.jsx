@@ -518,6 +518,24 @@ export default function App() {
               <button onClick={() => setPage("grid")} style={nb("#e2e8f0","#fff","#374151")}>← Template-uri</button>
               <button onClick={() => fileRef.current.click()} style={nb("#bae6fd","#f0f9ff","#0369a1")}>{photo ? "🔄 Foto" : "📷 Foto"}</button>
 
+              {/* Mobile switch in header */}
+              <div className="mobile-only" style={{ display: "none" }}>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    onClick={() => setMobileView("cv")}
+                    style={{ padding: "6px 10px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: mobileView === "cv" ? "#1a56db" : "#fff", color: mobileView === "cv" ? "#fff" : "#374151", fontWeight: 700, fontSize: 11 }}
+                  >
+                    Vezi CV
+                  </button>
+                  <button
+                    onClick={() => setMobileView("panel")}
+                    style={{ padding: "6px 10px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: mobileView === "panel" ? "#1a56db" : "#fff", color: mobileView === "panel" ? "#fff" : "#374151", fontWeight: 700, fontSize: 11 }}
+                  >
+                    Editează
+                  </button>
+                </div>
+              </div>
+
               <button onClick={() => setEditMode(e => !e)} style={nb(editMode ? "#fcd34d" : "#e2e8f0", editMode ? "#fffbeb" : "#fff", editMode ? "#92400e" : "#374151", 700)}>
                 {editMode ? "👁 Preview" : "✏️ Editează"}
               </button>
