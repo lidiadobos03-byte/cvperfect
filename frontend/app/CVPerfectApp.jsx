@@ -159,9 +159,16 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
   const set = (k, v) => setCvData(p => ({ ...p, [k]: v }));
   const setN = (arr, i, f, v) => setCvData(p => { const a = JSON.parse(JSON.stringify(p[arr])); a[i][f] = v; return { ...p, [arr]: a }; });
   const setL = (arr, i, v) => setCvData(p => { const a = [...p[arr]]; a[i] = v; return { ...p, [arr]: a }; });
-  const F = editMode
-    ? ({ v, onCh, multi, style, ph }) => <EF value={v} onChange={onCh} multiline={multi} style={style} placeholder={ph} />
-    : ({ v, style }) => <span style={style}>{v}</span>;
+  const E = ({ v, onCh, style, ph }) => (
+    editMode
+      ? <EF value={v} onChange={onCh} style={style} placeholder={ph} />
+      : <span style={style}>{v}</span>
+  );
+  const EM = ({ v, onCh, style, ph }) => (
+    editMode
+      ? <EF value={v} onChange={onCh} multiline style={style} placeholder={ph} />
+      : <span style={style}>{v}</span>
+  );
   const labels = lang === "en"
     ? { profil: "Professional Profile", exp: "Professional Experience", edu: "Education", comp: "Skills", limbi: "Languages", cert: "Certifications" }
     : { profil: "Profil Profesional", exp: "Experiență Profesională", edu: "Educație", comp: "Competențe", limbi: "Limbi Străine", cert: "Certificări" };
@@ -178,33 +185,31 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
               </div>}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <F v={cvData.nume} onCh={v => set("nume", v)} style={{ display: "block", color: "#fff", fontSize: 25, fontWeight: 700, letterSpacing: "-0.3px" }} />
-          <F v={cvData.titlu} onCh={v => set("titlu", v)} style={{ display: "block", color: "rgba(255,255,255,0.88)", fontSize: 13.5, fontWeight: 500, marginTop: 4 }} />
+          <E v={cvData.nume} onCh={v => set("nume", v)} style={{ display: "block", color: "#fff", fontSize: 25, fontWeight: 700, letterSpacing: "-0.3px" }} />
+          <E v={cvData.titlu} onCh={v => set("titlu", v)} style={{ display: "block", color: "rgba(255,255,255,0.88)", fontSize: 13.5, fontWeight: 500, marginTop: 4 }} />
           <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 10, fontSize: 11.5, color: "rgba(255,255,255,0.88)" }}>
-            <span>📧 <F v={cvData.email} onCh={v => set("email", v)} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
-            <span>📞 <F v={cvData.telefon} onCh={v => set("telefon", v)} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
-            <span>📍 <F v={cvData.oras} onCh={v => set("oras", v)} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
-            <span>🔗 <F v={cvData.linkedin} onCh={v => set("linkedin", v)} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
+            <span>📧 <E v={cvData.email} onCh={v => set("email", v)} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
+            <span>📞 <E v={cvData.telefon} onCh={v => set("telefon", v)} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
+            <span>📍 <E v={cvData.oras} onCh={v => set("oras", v)} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
+            <span>🔗 <E v={cvData.linkedin} onCh={v => set("linkedin", v)} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
           </div>
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 258px" }}>
         <div style={{ padding: "22px 26px 22px 42px" }}>
           <Sec title={labels.profil} color={color}>
-            {editMode
-              ? <EF value={cvData.despre} onChange={v => set("despre", v)} multiline style={{ fontSize: 13, lineHeight: 1.7, color: "#444", display: "block", width: "100%" }} placeholder="Profil profesional..." />
-              : <span style={{ fontSize: 13, lineHeight: 1.7, color: "#444", display: "block", width: "100%" }}>{cvData.despre}</span>}
+            <EM v={cvData.despre} onCh={v => set("despre", v)} style={{ fontSize: 13, lineHeight: 1.7, color: "#444", display: "block", width: "100%" }} ph="Profil profesional..." />
           </Sec>
           <Sec title={labels.exp} color={color}>
             {cvData.experienta.map((exp, i) => (
               <div key={i} style={{ marginBottom: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <F v={exp.rol} onCh={v => setN("experienta", i, "rol", v)} style={{ display: "block", fontWeight: 700, fontSize: 13.5, color: "#111" }} />
-                    <F v={exp.firma} onCh={v => setN("experienta", i, "firma", v)} style={{ display: "block", color, fontWeight: 600, fontSize: 12.5 }} />
+                    <E v={exp.rol} onCh={v => setN("experienta", i, "rol", v)} style={{ display: "block", fontWeight: 700, fontSize: 13.5, color: "#111" }} />
+                    <E v={exp.firma} onCh={v => setN("experienta", i, "firma", v)} style={{ display: "block", color, fontWeight: 600, fontSize: 12.5 }} />
                   </div>
                   <div style={{ background: color, color: "#fff", padding: "2px 9px", borderRadius: 20, fontSize: 11, whiteSpace: "nowrap", flexShrink: 0, alignSelf: "flex-start" }}>
-                    <F v={exp.perioada} onCh={v => setN("experienta", i, "perioada", v)} style={{ color: "#fff" }} />
+                    <E v={exp.perioada} onCh={v => setN("experienta", i, "perioada", v)} style={{ color: "#fff" }} />
                   </div>
                 </div>
                 {editMode
@@ -217,10 +222,10 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
             {cvData.educatie.map((edu, i) => (
               <div key={i} style={{ marginBottom: 10, display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <div style={{ flex: 1 }}>
-                  <F v={edu.diploma} onCh={v => setN("educatie", i, "diploma", v)} style={{ display: "block", fontWeight: 700, fontSize: 13 }} />
-                  <F v={edu.institutie} onCh={v => setN("educatie", i, "institutie", v)} style={{ display: "block", color, fontSize: 12.5 }} />
+                  <E v={edu.diploma} onCh={v => setN("educatie", i, "diploma", v)} style={{ display: "block", fontWeight: 700, fontSize: 13 }} />
+                  <E v={edu.institutie} onCh={v => setN("educatie", i, "institutie", v)} style={{ display: "block", color, fontSize: 12.5 }} />
                 </div>
-                <F v={edu.perioada} onCh={v => setN("educatie", i, "perioada", v)} style={{ fontSize: 11.5, color: "#888", whiteSpace: "nowrap", flexShrink: 0 }} />
+                <E v={edu.perioada} onCh={v => setN("educatie", i, "perioada", v)} style={{ fontSize: 11.5, color: "#888", whiteSpace: "nowrap", flexShrink: 0 }} />
               </div>
             ))}
           </Sec>
