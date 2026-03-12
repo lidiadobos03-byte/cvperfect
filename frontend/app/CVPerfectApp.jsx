@@ -577,6 +577,23 @@ export default function App() {
       {/* ── EDITOR ── */}
       {page === "editor" && tmpl && cvData && (
         <div className="editor-layout" style={{ maxWidth: 1260, margin: "0 auto", padding: "22px 20px", display: "grid", gridTemplateColumns: "1fr 300px", gap: 18, alignItems: "start" }}>
+          {/* Mobile switch */}
+          <div className="mobile-only mobile-switch" style={{ display: "none" }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setMobileView("cv")}
+                style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: mobileView === "cv" ? "#1a56db" : "#fff", color: mobileView === "cv" ? "#fff" : "#374151", fontWeight: 700, fontSize: 12 }}
+              >
+                Vezi CV
+              </button>
+              <button
+                onClick={() => setMobileView("panel")}
+                style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: mobileView === "panel" ? "#1a56db" : "#fff", color: mobileView === "panel" ? "#fff" : "#374151", fontWeight: 700, fontSize: 12 }}
+              >
+                Editează
+              </button>
+            </div>
+          </div>
           {/* CV Document */}
           <div className={`editor-doc ${mobileView !== "cv" ? "mobile-hidden" : ""}`} style={{ background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 6px 28px rgba(0,0,0,0.09)", border: `2px solid ${editMode ? "#fcd34d" : "#e8ecf4"}`, transition: "border 0.2s" }}>
             <CVDocument cvData={cvData} setCvData={setCvData} color={tmpl.color} photoUrl={photo} onPhotoClick={() => fileRef.current.click()} editMode={editMode} lang={lang} />
@@ -584,23 +601,6 @@ export default function App() {
 
           {/* Right Panel */}
           <div className={`editor-sidebar ${mobileView !== "panel" ? "mobile-hidden" : ""}`} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* Mobile switch */}
-            <div className="mobile-only" style={{ display: "none" }}>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  onClick={() => setMobileView("cv")}
-                  style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: mobileView === "cv" ? "#1a56db" : "#fff", color: mobileView === "cv" ? "#fff" : "#374151", fontWeight: 700, fontSize: 12 }}
-                >
-                  Vezi CV
-                </button>
-                <button
-                  onClick={() => setMobileView("panel")}
-                  style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: mobileView === "panel" ? "#1a56db" : "#fff", color: mobileView === "panel" ? "#fff" : "#374151", fontWeight: 700, fontSize: 12 }}
-                >
-                  Editează
-                </button>
-              </div>
-            </div>
 
             {/* Actions */}
             <div style={{ background: "#fff", border: `1.5px solid ${editMode ? "#fcd34d" : "#e8ecf4"}`, borderRadius: 14, padding: 18 }}>

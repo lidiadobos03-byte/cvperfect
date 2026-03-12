@@ -45,4 +45,13 @@ body {
   .mobile-hidden {
     display: none !important;
   }
+  .mobile-switch {
+    position: sticky;
+    top: 64px;
+    z-index: 30;
+    background: #f8fafc;
+    padding: 8px;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 10px;
+  }
 }
