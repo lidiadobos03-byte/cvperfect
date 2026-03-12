@@ -190,10 +190,18 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
           <EditableText value={cvData.nume} onChange={v => set("nume", v)} editMode={editMode} style={{ display: "block", color: "#fff", fontSize: 25, fontWeight: 700, letterSpacing: "-0.3px" }} />
           <EditableText value={cvData.titlu} onChange={v => set("titlu", v)} editMode={editMode} style={{ display: "block", color: "rgba(255,255,255,0.88)", fontSize: 13.5, fontWeight: 500, marginTop: 4 }} />
           <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 10, fontSize: 11.5, color: "rgba(255,255,255,0.88)" }}>
-            <span>📧 <EditableText value={cvData.email} onChange={v => set("email", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
-            <span>📞 <EditableText value={cvData.telefon} onChange={v => set("telefon", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
-            <span>📍 <EditableText value={cvData.oras} onChange={v => set("oras", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
-            <span>🔗 <EditableText value={cvData.linkedin} onChange={v => set("linkedin", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
+            {(editMode || cvData.email) && (
+              <span>📧 <EditableText value={cvData.email} onChange={v => set("email", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
+            )}
+            {(editMode || cvData.telefon) && (
+              <span>📞 <EditableText value={cvData.telefon} onChange={v => set("telefon", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
+            )}
+            {(editMode || cvData.oras) && (
+              <span>📍 <EditableText value={cvData.oras} onChange={v => set("oras", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
+            )}
+            {(editMode || cvData.linkedin) && (
+              <span>🔗 <EditableText value={cvData.linkedin} onChange={v => set("linkedin", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
+            )}
           </div>
         </div>
       </div>
@@ -222,14 +230,32 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
           </Sec>
           <Sec title={labels.edu} color={color}>
             {cvData.educatie.map((edu, i) => (
-              <div key={i} style={{ marginBottom: 10, display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <div key={i} style={{ marginBottom: 10, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
                 <div style={{ flex: 1 }}>
-                  <EditableText value={edu.diploma} onChange={v => setN("educatie", i, "diploma", v)} editMode={editMode} style={{ display: "block", fontWeight: 700, fontSize: 13 }} />
-                  <EditableText value={edu.institutie} onChange={v => setN("educatie", i, "institutie", v)} editMode={editMode} style={{ display: "block", color, fontSize: 12.5 }} />
+                  <EditableText value={edu.diploma} onChange={v => setN("educatie", i, "diploma", v)} editMode={editMode} style={{ display: "block", fontWeight: 700, fontSize: 13 }} placeholder="Diplomă / Curs" />
+                  <EditableText value={edu.institutie} onChange={v => setN("educatie", i, "institutie", v)} editMode={editMode} style={{ display: "block", color, fontSize: 12.5 }} placeholder="Instituție" />
                 </div>
-                <EditableText value={edu.perioada} onChange={v => setN("educatie", i, "perioada", v)} editMode={editMode} style={{ fontSize: 11.5, color: "#888", whiteSpace: "nowrap", flexShrink: 0 }} />
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <EditableText value={edu.perioada} onChange={v => setN("educatie", i, "perioada", v)} editMode={editMode} style={{ fontSize: 11.5, color: "#888", whiteSpace: "nowrap" }} placeholder="Perioadă" />
+                  {editMode && (
+                    <button
+                      onClick={() => setCvData(p => ({ ...p, educatie: p.educatie.filter((_, idx) => idx !== i) }))}
+                      style={{ border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 11, padding: "2px 6px", borderRadius: 6, cursor: "pointer" }}
+                    >
+                      Șterge
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
+            {editMode && (
+              <button
+                onClick={() => setCvData(p => ({ ...p, educatie: [...p.educatie, { institutie: "", perioada: "", diploma: "" }] }))}
+                style={{ marginTop: 6, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11.5, padding: "6px 8px", borderRadius: 7, cursor: "pointer" }}
+              >
+                + Adaugă educație
+              </button>
+            )}
           </Sec>
         </div>
         <div style={{ background: "#f7f8fa", padding: "22px 18px", borderLeft: "1px solid #eee" }}>
