@@ -176,7 +176,7 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
     : { profil: "Profil Profesional", exp: "Experiență Profesională", edu: "Educație", comp: "Competențe", limbi: "Limbi Străine", cert: "Certificări" };
 
   return (
-    <div id="cv-document" style={{ fontFamily: "'Segoe UI', Arial, sans-serif", width: 794, background: "#fff", color: "#1a1a1a" }}>
+    <div id="cv-document" className="cv-document" style={{ fontFamily: "'Segoe UI', Arial, sans-serif", width: "100%", maxWidth: 794, background: "#fff", color: "#1a1a1a" }}>
       <div style={{ background: color, padding: "30px 42px 22px", display: "flex", alignItems: "center", gap: 24 }}>
         <div onClick={onPhotoClick} style={{ flexShrink: 0, cursor: "pointer" }}>
           {photoUrl
@@ -205,7 +205,7 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
           </div>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 258px" }}>
+      <div className="cv-document-grid" style={{ display: "grid", gridTemplateColumns: "1fr 258px" }}>
         <div style={{ padding: "22px 26px 22px 42px" }}>
           <Sec title={labels.profil} color={color}>
             <EditableTextMulti value={cvData.despre} onChange={v => set("despre", v)} editMode={editMode} style={{ fontSize: 13, lineHeight: 1.7, color: "#444", display: "block", width: "100%" }} placeholder="Profil profesional..." />
@@ -574,14 +574,14 @@ export default function App() {
 
       {/* ── EDITOR ── */}
       {page === "editor" && tmpl && cvData && (
-        <div style={{ maxWidth: 1260, margin: "0 auto", padding: "22px 20px", display: "grid", gridTemplateColumns: "1fr 300px", gap: 18, alignItems: "start" }}>
+        <div className="editor-layout" style={{ maxWidth: 1260, margin: "0 auto", padding: "22px 20px", display: "grid", gridTemplateColumns: "1fr 300px", gap: 18, alignItems: "start" }}>
           {/* CV Document */}
-          <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 6px 28px rgba(0,0,0,0.09)", border: `2px solid ${editMode ? "#fcd34d" : "#e8ecf4"}`, transition: "border 0.2s" }}>
+          <div className="editor-doc" style={{ background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 6px 28px rgba(0,0,0,0.09)", border: `2px solid ${editMode ? "#fcd34d" : "#e8ecf4"}`, transition: "border 0.2s" }}>
             <CVDocument cvData={cvData} setCvData={setCvData} color={tmpl.color} photoUrl={photo} onPhotoClick={() => fileRef.current.click()} editMode={editMode} lang={lang} />
           </div>
 
           {/* Right Panel */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div className="editor-sidebar" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
             {/* Actions */}
             <div style={{ background: "#fff", border: `1.5px solid ${editMode ? "#fcd34d" : "#e8ecf4"}`, borderRadius: 14, padding: 18 }}>
