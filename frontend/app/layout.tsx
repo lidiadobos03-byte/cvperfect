@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "CVPerfect.online — 18 template-uri CV, editare rapidă și export PDF",
   description:
-    "Creează CV-ul perfect în română cu 18 template-uri profesionale. Editare live, export PDF real, optimizat ATS.",
+    "Construiește un CV care arată profesionist în 3 minute. Alege dintre 18 template-uri curate, optimizate pentru ATS. Completezi datele o singură dată, exporți PDF real.",
 };
 
 export default function RootLayout({
