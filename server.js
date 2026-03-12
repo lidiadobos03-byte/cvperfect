@@ -13,6 +13,10 @@ const express = require("express");
 const cors = require("cors");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
+// Node 18+ are fetch built-in, dar node-fetch e fallback
+let fetch;
+try { fetch = globalThis.fetch; } catch { fetch = require("node-fetch"); }
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 const FRONTEND_URL = process.env.FRONTEND_URL || "https://cvperfect.online";
@@ -67,6 +71,41 @@ app.use(express.json());
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "CVPerfect API", timestamp: new Date().toISOString() });
+});
+
+// ─── POST /ai — Proxy către Anthropic (rezolvă CORS din browser) ─────────────
+// Body: { systemPrompt: "...", userPrompt: "..." }
+// Returnează: { text: "..." }
+app.post("/ai", async (req, res) => {
+  const { systemPrompt, userPrompt } = req.body;
+  if (!systemPrompt || !userPrompt) {
+    return res.status(400).json({ error: "systemPrompt și userPrompt sunt obligatorii" });
+  }
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1500,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userPrompt }]
+      })
+    });
+
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message);
+    const text = data.content?.[0]?.text || "";
+    res.json({ text });
+  } catch (err) {
+    console.error("❌ Eroare AI:", err.message);
+    res.status(500).json({ error: "Eroare AI. Încearcă din nou." });
+  }
 });
 
 // ─── POST /create-checkout ────────────────────────────────────────────────────
@@ -192,7 +231,8 @@ app.listen(PORT, () => {
   ╔════════════════════════════════════════╗
   ║   CVPerfect Backend — Running! 🚀     ║
   ║   Port: ${PORT}                           ║
-  ║   Stripe: ${process.env.STRIPE_SECRET_KEY ? "✅ Configured" : "❌ Missing key"}          ║
+  ║   Stripe: ${process.env.STRIPE_SECRET_KEY ? "✅ OK" : "❌ Lipsă cheie"}                ║
+  ║   AI:     ${process.env.ANTHROPIC_API_KEY ? "✅ OK" : "❌ Lipsă cheie"}                ║
   ╚════════════════════════════════════════╝
   `);
 });
