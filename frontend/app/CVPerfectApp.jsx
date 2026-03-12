@@ -146,9 +146,10 @@ function EF({ value, onChange, multiline, style, placeholder }) {
   const [active, setActive] = useState(false);
   const ref = useRef();
   useEffect(() => { if (active && ref.current) ref.current.focus(); }, [active]);
+  const safeValue = value ?? "";
   const base = { ...style, outline: "none", background: active ? "rgba(253,224,71,0.28)" : "transparent", border: active ? "1.5px dashed #f59e0b" : "1.5px dashed transparent", borderRadius: 3, padding: "1px 4px", transition: "all 0.15s", cursor: "text", fontFamily: "inherit", fontSize: "inherit", fontWeight: "inherit", color: "inherit", letterSpacing: "inherit", lineHeight: "inherit" };
-  if (multiline) return <textarea ref={ref} value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} onFocus={() => setActive(true)} onBlur={() => setActive(false)} rows={4} style={{ ...base, width: "100%", resize: "vertical", display: "block", boxSizing: "border-box" }} />;
-  return <input ref={ref} type="text" value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} onFocus={() => setActive(true)} onBlur={() => setActive(false)} style={{ ...base, width: "100%", display: "inline-block", boxSizing: "border-box" }} />;
+  if (multiline) return <textarea ref={ref} value={safeValue} placeholder={placeholder} onChange={e => onChange(e.target.value)} onFocus={() => setActive(true)} onBlur={() => setActive(false)} rows={4} style={{ ...base, width: "100%", resize: "vertical", display: "block", boxSizing: "border-box" }} />;
+  return <input ref={ref} type="text" value={safeValue} placeholder={placeholder} onChange={e => onChange(e.target.value)} onFocus={() => setActive(true)} onBlur={() => setActive(false)} style={{ ...base, width: "100%", display: "inline-block", boxSizing: "border-box" }} />;
 }
 
 // ─── CV DOCUMENT ──────────────────────────────────────────────────────────────
@@ -190,7 +191,9 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
       <div style={{ display: "grid", gridTemplateColumns: "1fr 258px" }}>
         <div style={{ padding: "22px 26px 22px 42px" }}>
           <Sec title={labels.profil} color={color}>
-            <F v={cvData.despre} onCh={v => set("despre", v)} multi style={{ fontSize: 13, lineHeight: 1.7, color: "#444", display: "block", width: "100%" }} ph="Profil profesional..." />
+            {editMode
+              ? <EF value={cvData.despre} onChange={v => set("despre", v)} multiline style={{ fontSize: 13, lineHeight: 1.7, color: "#444", display: "block", width: "100%" }} placeholder="Profil profesional..." />
+              : <span style={{ fontSize: 13, lineHeight: 1.7, color: "#444", display: "block", width: "100%" }}>{cvData.despre}</span>}
           </Sec>
           <Sec title={labels.exp} color={color}>
             {cvData.experienta.map((exp, i) => (
