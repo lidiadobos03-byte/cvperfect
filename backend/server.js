@@ -126,49 +126,6 @@ app.get("/verify-payment", async (req, res) => {
   }
 });
 
-// ─── POST /ai ────────────────────────────────────────────────────────────────
-app.post("/ai", async (req, res) => {
-  try {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return res.status(400).json({ error: "Missing ANTHROPIC_API_KEY" });
-    }
-
-    const { systemPrompt, userPrompt } = req.body || {};
-    if (!systemPrompt || !userPrompt) {
-      return res.status(400).json({ error: "Missing prompts" });
-    }
-
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20240620",
-        max_tokens: 900,
-        system: systemPrompt,
-        messages: [{ role: "user", content: userPrompt }],
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("Anthropic error:", errText);
-      return res.status(500).json({ error: "AI provider error" });
-    }
-
-    const data = await response.json();
-    const text = data?.content?.[0]?.text || "";
-    res.json({ text });
-  } catch (error) {
-    console.error("AI error:", error);
-    res.status(500).json({ error: "AI error" });
-  }
-});
-
 // Exemplu de endpoint
 app.get("/", (_req, res) => {
   res.send("Server running");

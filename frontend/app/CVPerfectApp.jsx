@@ -18,18 +18,6 @@ function useHtml2pdf() {
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://cvperfect-backend.onrender.com";
 
-// ─── Anthropic AI call — prin backend (CORS fix) ─────────────────────────────
-async function callAI(systemPrompt, userPrompt) {
-  const res = await fetch(`${API_URL}/ai`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ systemPrompt, userPrompt })
-  });
-  if (!res.ok) throw new Error(`AI error: ${res.status}`);
-  const data = await res.json();
-  return data.text || "";
-}
-
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 
 // ─── STRIPE PAYMENT HOOK ──────────────────────────────────────────────────────
@@ -95,7 +83,7 @@ function PaywallModal({ onClose, onPay, templateName, lang, color }) {
         {/* Title */}
         <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 800, color: "#0f172a", textAlign: "center" }}>Descarcă CV-ul tău</h2>
         <p style={{ margin: "0 0 24px", fontSize: 14, color: "#64748b", textAlign: "center", lineHeight: 1.6 }}>
-          CV-ul tău profesional <strong>{templateName}</strong> ({lang === "en" ? "Engleză 🇬🇧" : "Română 🇷🇴"}) este gata de descărcat.
+          CV-ul tău profesional <strong>{templateName}</strong> (Română 🇷🇴) este gata de descărcat.
         </p>
 
         {/* Price box */}
@@ -311,178 +299,6 @@ function TemplateCard({ template, onSelect }) {
   );
 }
 
-// ─── AI PANEL ─────────────────────────────────────────────────────────────────
-function AIPanel({ cvData, setCvData, color, job, onTranslated }) {
-  const [aiState, setAiState] = useState("idle"); // idle | loading | done | error
-  const [transState, setTransState] = useState("idle");
-  const [lastAction, setLastAction] = useState("");
-
-  const improveCV = async () => {
-    setAiState("loading"); setLastAction("improve");
-    try {
-      const result = await callAI(
-        `Ești un expert în redactarea CV-urilor profesionale românești, optimizate ATS. 
-Răspunzi DOAR cu JSON valid, fără markdown, fără explicații, fără text suplimentar.`,
-        `Îmbunătățește textele din acest CV pentru jobul de "${job}". 
-Fă-le mai puternice, mai profesionale, orientate spre rezultate și cu cuvinte cheie ATS.
-Menține aceeași limbă (română).
-
-CV actual:
-- Profil: ${cvData.despre}
-- Experiență 1 desc: ${cvData.experienta[0]?.desc}
-- Experiență 2 desc: ${cvData.experienta[1]?.desc || "N/A"}
-
-Răspunde STRICT cu acest JSON (nimic altceva):
-{
-  "despre": "text îmbunătățit profil",
-  "exp0": "realizări îmbunătățite exp 1 separate cu •",
-  "exp1": "realizări îmbunătățite exp 2 separate cu • (sau gol dacă nu există)"
-}`
-      );
-      const clean = result.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
-      setCvData(prev => {
-        const next = JSON.parse(JSON.stringify(prev));
-        if (parsed.despre) next.despre = parsed.despre;
-        if (parsed.exp0 && next.experienta[0]) next.experienta[0].desc = parsed.exp0;
-        if (parsed.exp1 && next.experienta[1]) next.experienta[1].desc = parsed.exp1;
-        return next;
-      });
-      setAiState("done");
-    } catch (e) {
-      console.error(e); setAiState("error");
-    }
-  };
-
-  const translateCV = async () => {
-    setTransState("loading"); setLastAction("translate");
-    try {
-      const result = await callAI(
-        `You are a professional CV translator and career expert. 
-You translate Romanian CVs to professional English, adapting terminology for international job markets.
-Respond ONLY with valid JSON, no markdown, no extra text.`,
-        `Translate this entire Romanian CV to professional English for job: "${job}".
-Adapt all Romanian-specific terms to international equivalents.
-Keep names, emails, phone numbers, dates, and company names as-is.
-
-CV to translate:
-${JSON.stringify({
-  titlu: cvData.titlu,
-  despre: cvData.despre,
-  experienta: cvData.experienta.map(e => ({ rol: e.rol, firma: e.firma, perioada: e.perioada, desc: e.desc })),
-  educatie: cvData.educatie.map(e => ({ diploma: e.diploma, institutie: e.institutie, perioada: e.perioada })),
-  competente: cvData.competente,
-  limbi: cvData.limbi,
-  certificari: cvData.certificari
-})}
-
-Respond ONLY with this exact JSON structure:
-{
-  "titlu": "...",
-  "despre": "...",
-  "experienta": [{"rol":"...","firma":"...","perioada":"...","desc":"..."}],
-  "educatie": [{"diploma":"...","institutie":"...","perioada":"..."}],
-  "competente": ["..."],
-  "limbi": ["..."],
-  "certificari": ["..."]
-}`
-      );
-      const clean = result.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
-      const translated = {
-        ...cvData,
-        titlu: parsed.titlu || cvData.titlu,
-        despre: parsed.despre || cvData.despre,
-        experienta: parsed.experienta?.map((e, i) => ({ ...cvData.experienta[i], ...e })) || cvData.experienta,
-        educatie: parsed.educatie?.map((e, i) => ({ ...cvData.educatie[i], ...e })) || cvData.educatie,
-        competente: parsed.competente || cvData.competente,
-        limbi: parsed.limbi || cvData.limbi,
-        certificari: parsed.certificari || cvData.certificari,
-      };
-      onTranslated(translated);
-      setTransState("done");
-    } catch (e) {
-      console.error(e); setTransState("error");
-    }
-  };
-
-  const AIBtn = ({ onClick, state, idleLabel, loadLabel, doneLabel, errorLabel, gradient }) => (
-    <button onClick={onClick} disabled={state === "loading"}
-      style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "none", cursor: state === "loading" ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 13, color: "#fff", background: state === "loading" ? "#94a3b8" : state === "done" ? "#059669" : state === "error" ? "#dc2626" : gradient, transition: "all 0.2s", boxShadow: state === "loading" || state === "done" || state === "error" ? "none" : "0 4px 14px rgba(0,0,0,0.2)" }}>
-      {state === "loading" ? loadLabel : state === "done" ? doneLabel : state === "error" ? errorLabel : idleLabel}
-    </button>
-  );
-
-  return (
-    <div style={{ background: "#fff", border: "1.5px solid #e8ecf4", borderRadius: 14, padding: 16, overflow: "hidden" }}>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-        <div style={{ width: 32, height: 32, borderRadius: 9, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontSize: 16 }}>✨</span>
-        </div>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 13.5, color: "#0f172a" }}>AI Assistant</div>
-          <div style={{ fontSize: 10.5, color: "#94a3b8" }}>Powered by Claude</div>
-        </div>
-      </div>
-
-      {/* Improve */}
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>🚀 Îmbunătățire CV</div>
-        <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, margin: "0 0 8px" }}>
-          AI-ul rescrie profilul și realizările tale — mai puternic, orientat spre rezultate, ATS-optimizat.
-        </p>
-        <AIBtn
-          onClick={improveCV}
-          state={aiState}
-          idleLabel="✨ Îmbunătățește CV-ul cu AI"
-          loadLabel="⏳ AI lucrează..."
-          doneLabel="✓ CV îmbunătățit cu succes!"
-          errorLabel="✗ Eroare – încearcă din nou"
-          gradient="linear-gradient(135deg, #6366f1, #8b5cf6)"
-        />
-        {aiState === "done" && (
-          <div style={{ marginTop: 8, padding: "8px 10px", background: "#f0fdf4", borderRadius: 8, borderLeft: "3px solid #059669", fontSize: 12, color: "#166534" }}>
-            ✓ Profilul și realizările au fost rescrise de AI cu cuvinte cheie ATS pentru jobul de <strong>{job}</strong>!
-          </div>
-        )}
-      </div>
-
-      <div style={{ height: 1, background: "#f1f5f9", margin: "14px 0" }} />
-
-      {/* Translate */}
-      <div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>🌍 Traducere în Engleză</div>
-        <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, margin: "0 0 8px" }}>
-          Traduce automat întregul CV în engleză profesională, adaptat pentru piața internațională.
-        </p>
-        <AIBtn
-          onClick={translateCV}
-          state={transState}
-          idleLabel="🌍 Traduce CV în Engleză"
-          loadLabel="⏳ Se traduce..."
-          doneLabel="✓ CV tradus în engleză!"
-          errorLabel="✗ Eroare – încearcă din nou"
-          gradient="linear-gradient(135deg, #0369a1, #0891b2)"
-        />
-        {transState === "done" && (
-          <div style={{ marginTop: 8, padding: "8px 10px", background: "#eff6ff", borderRadius: 8, borderLeft: "3px solid #1d4ed8", fontSize: 12, color: "#1e40af" }}>
-            ✓ CV-ul a fost tradus! Apasă <strong>🇬🇧 EN</strong> din bara de sus pentru a vedea versiunea engleză.
-          </div>
-        )}
-      </div>
-
-      <div style={{ height: 1, background: "#f1f5f9", margin: "14px 0" }} />
-
-      {/* Reset */}
-      <button onClick={() => { setAiState("idle"); setTransState("idle"); }}
-        style={{ width: "100%", padding: "7px", borderRadius: 8, border: "1.5px dashed #cbd5e1", background: "transparent", cursor: "pointer", color: "#94a3b8", fontSize: 11.5 }}>
-        ↺ Resetează AI
-      </button>
-    </div>
-  );
-}
-
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 const fBtn = { width: "100%", padding: "9px 14px", borderRadius: 9, cursor: "pointer", fontWeight: 600, fontSize: 12.5, textAlign: "center", boxSizing: "border-box" };
 
@@ -491,8 +307,7 @@ export default function App() {
   const { paid, setPaid, checking, startPayment } = useStripePayment();
   const [tmpl, setTmpl] = useState(null);
   const [cvRO, setCvRO] = useState(null);
-  const [cvEN, setCvEN] = useState(null);
-  const [lang, setLang] = useState("ro");
+  const lang = "ro";
   const [photo, setPhoto] = useState(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState("grid");
@@ -502,8 +317,8 @@ export default function App() {
   const [showPaywall, setShowPaywall] = useState(false);
   const fileRef = useRef();
 
-  const cvData = lang === "en" && cvEN ? cvEN : cvRO;
-  const setCvData = lang === "en" && cvEN ? setCvEN : setCvRO;
+  const cvData = cvRO;
+  const setCvData = setCvRO;
 
   const filtered = cvTemplates.filter(t =>
     t.job.toLowerCase().includes(search.toLowerCase()) ||
@@ -513,8 +328,6 @@ export default function App() {
   const select = (t) => {
     setTmpl(t);
     setCvRO(JSON.parse(JSON.stringify(t.data)));
-    setCvEN(null);
-    setLang("ro");
     setPhoto(null);
     setEditMode(false);
     setPage("editor");
@@ -603,22 +416,13 @@ export default function App() {
               <button onClick={() => setPage("grid")} style={nb("#e2e8f0","#fff","#374151")}>← Template-uri</button>
               <button onClick={() => fileRef.current.click()} style={nb("#bae6fd","#f0f9ff","#0369a1")}>{photo ? "🔄 Foto" : "📷 Foto"}</button>
 
-              {/* Lang toggle */}
-              <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: "1.5px solid #e2e8f0" }}>
-                <button onClick={() => setLang("ro")} style={{ padding: "6px 12px", background: lang === "ro" ? "#1a56db" : "#fff", color: lang === "ro" ? "#fff" : "#374151", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>🇷🇴 RO</button>
-                <button onClick={() => { if (!cvEN) alert("Apasă 'Traduce CV în Engleză' din panoul AI mai întâi!"); else setLang("en"); }}
-                  style={{ padding: "6px 12px", background: lang === "en" ? "#0369a1" : "#fff", color: lang === "en" ? "#fff" : cvEN ? "#374151" : "#cbd5e1", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 12, borderLeft: "1px solid #e2e8f0" }}>
-                  🇬🇧 EN {cvEN ? "✓" : ""}
-                </button>
-              </div>
-
               <button onClick={() => setEditMode(e => !e)} style={nb(editMode ? "#fcd34d" : "#e2e8f0", editMode ? "#fffbeb" : "#fff", editMode ? "#92400e" : "#374151", 700)}>
                 {editMode ? "👁 Preview" : "✏️ Editează"}
               </button>
               {editMode && <button onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 2000); }} style={nb(saved ? "#059669" : "#bbf7d0", saved ? "#059669" : "#f0fdf4", saved ? "#fff" : "#059669", 700)}>{saved ? "✓ Salvat!" : "💾 Salvează"}</button>}
               <button onClick={handleDownloadClick} disabled={exporting}
                 style={{ padding: "7px 16px", borderRadius: 8, background: paid ? "linear-gradient(135deg,#059669,#0d9488)" : exporting ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", cursor: exporting ? "not-allowed" : "pointer", fontWeight: 800, fontSize: 12.5, boxShadow: exporting ? "none" : `0 3px 10px ${tmpl.color}44` }}>
-                {exporting ? "⏳..." : paid ? `⬇️ PDF ${lang.toUpperCase()} ✓` : `🔒 PDF ${lang.toUpperCase()} — 19 RON`}
+                {exporting ? "⏳..." : paid ? "⬇️ PDF RO ✓" : "🔒 PDF RO — 19 RON"}
               </button>
             </div>
           )}
@@ -631,16 +435,6 @@ export default function App() {
         <div style={{ background: "#fef9c3", borderBottom: "1.5px solid #fde047", padding: "7px 20px", textAlign: "center" }}>
           <span style={{ fontSize: 13, color: "#854d0e", fontWeight: 600 }}>
             ✏️ Mod editare — Click pe orice câmp din CV pentru a-l modifica live
-            {lang === "en" && " · Editezi versiunea ENGLEZĂ"}
-          </span>
-        </div>
-      )}
-
-      {/* Language banner */}
-      {page === "editor" && lang === "en" && cvEN && (
-        <div style={{ background: "#eff6ff", borderBottom: "1.5px solid #bfdbfe", padding: "7px 20px", textAlign: "center" }}>
-          <span style={{ fontSize: 13, color: "#1e40af", fontWeight: 600 }}>
-            🇬🇧 Vizualizezi versiunea ENGLEZĂ a CV-ului · <span style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => setLang("ro")}>Revino la versiunea română</span>
           </span>
         </div>
       )}
@@ -649,16 +443,16 @@ export default function App() {
       {page === "grid" && (
         <div style={{ maxWidth: 1260, margin: "0 auto", padding: "34px 20px" }}>
           <div style={{ textAlign: "center", marginBottom: 40 }}>
-            <div style={{ display: "inline-block", background: "linear-gradient(135deg,#eff6ff,#faf5ff)", border: "1px solid #c7d2fe", borderRadius: 20, padding: "4px 14px", fontSize: 12, color: "#4338ca", fontWeight: 600, marginBottom: 12 }}>✦ 18 Template-uri · AI · RO & EN</div>
+            <div style={{ display: "inline-block", background: "linear-gradient(135deg,#eff6ff,#faf5ff)", border: "1px solid #c7d2fe", borderRadius: 20, padding: "4px 14px", fontSize: 12, color: "#4338ca", fontWeight: 600, marginBottom: 12 }}>✦ 18 Template-uri · RO</div>
             <h1 style={{ fontSize: 38, fontWeight: 900, color: "#0f172a", margin: "0 0 10px", letterSpacing: "-1px", lineHeight: 1.2 }}>
               Crează CV-ul Perfect<br />
-              <span style={{ background: "linear-gradient(135deg,#1a56db,#7c3aed)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>cu AI în 3 Minute</span>
+              <span style={{ background: "linear-gradient(135deg,#1a56db,#7c3aed)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>în 3 Minute</span>
             </h1>
             <p style={{ fontSize: 15.5, color: "#64748b", margin: "0 auto 24px", maxWidth: 500, lineHeight: 1.65 }}>
-              Editare live · AI îmbunătățire · Traducere EN automată · Export PDF real
+              Editare live · Export PDF real · Optimizat ATS
             </p>
             <div style={{ display: "flex", justifyContent: "center", gap: 36, marginBottom: 32 }}>
-              {[["18","Template-uri"],["✨","AI Improve"],["🌍","RO + EN"],["PDF","Export Real"]].map(([v,l]) => (
+              {[["18","Template-uri"],["✏️","Editare Live"],["PDF","Export Real"]].map(([v,l]) => (
                 <div key={l} style={{ textAlign: "center" }}>
                   <div style={{ fontSize: 21, fontWeight: 800, color: "#1a56db" }}>{v}</div>
                   <div style={{ fontSize: 11.5, color: "#94a3b8" }}>{l}</div>
@@ -682,7 +476,7 @@ export default function App() {
       {page === "editor" && tmpl && cvData && (
         <div style={{ maxWidth: 1260, margin: "0 auto", padding: "22px 20px", display: "grid", gridTemplateColumns: "1fr 300px", gap: 18, alignItems: "start" }}>
           {/* CV Document */}
-          <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 6px 28px rgba(0,0,0,0.09)", border: `2px solid ${editMode ? "#fcd34d" : lang === "en" ? "#bfdbfe" : "#e8ecf4"}`, transition: "border 0.2s" }}>
+          <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 6px 28px rgba(0,0,0,0.09)", border: `2px solid ${editMode ? "#fcd34d" : "#e8ecf4"}`, transition: "border 0.2s" }}>
             <CVDocument cvData={cvData} setCvData={setCvData} color={tmpl.color} photoUrl={photo} onPhotoClick={() => fileRef.current.click()} editMode={editMode} lang={lang} />
           </div>
 
@@ -695,7 +489,7 @@ export default function App() {
                 <span style={{ fontSize: 22 }}>{tmpl.icon}</span>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>{tmpl.job}</div>
-                  <div style={{ fontSize: 11, color: "#94a3b8" }}>Template #{tmpl.id} · {lang === "en" ? "🇬🇧 Engleză" : "🇷🇴 Română"}</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8" }}>Template #{tmpl.id} · 🇷🇴 Română</div>
                 </div>
               </div>
 
@@ -711,26 +505,10 @@ export default function App() {
 
                 <button onClick={handleDownloadClick} disabled={exporting}
                   style={{ ...fBtn, padding: "12px", background: paid ? "linear-gradient(135deg,#059669,#0d9488)" : exporting ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", fontWeight: 800, fontSize: 14, cursor: exporting ? "not-allowed" : "pointer", boxShadow: exporting ? "none" : `0 4px 14px ${tmpl.color}44` }}>
-                  {exporting ? "⏳ Generare PDF..." : paid ? `⬇️ Descarcă PDF ${lang.toUpperCase()} (plătit ✓)` : `🔒 Descarcă PDF — 19 RON`}
+                  {exporting ? "⏳ Generare PDF..." : paid ? "⬇️ Descarcă PDF RO (plătit ✓)" : "🔒 Descarcă PDF — 19 RON"}
                 </button>
-
-                {cvEN && (
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => setLang("ro")} style={{ ...fBtn, flex: 1, background: lang === "ro" ? "#1a56db" : "#f8fafc", color: lang === "ro" ? "#fff" : "#374151", border: `1.5px solid ${lang === "ro" ? "#1a56db" : "#e2e8f0"}`, padding: "8px" }}>🇷🇴 Română</button>
-                    <button onClick={() => setLang("en")} style={{ ...fBtn, flex: 1, background: lang === "en" ? "#0369a1" : "#f8fafc", color: lang === "en" ? "#fff" : "#374151", border: `1.5px solid ${lang === "en" ? "#0369a1" : "#e2e8f0"}`, padding: "8px" }}>🇬🇧 Engleză</button>
-                  </div>
-                )}
               </div>
             </div>
-
-            {/* AI Panel */}
-            <AIPanel
-              cvData={cvRO}
-              setCvData={setCvRO}
-              color={tmpl.color}
-              job={tmpl.job}
-              onTranslated={(translated) => { setCvEN(translated); setLang("en"); }}
-            />
 
             {/* Contact quick edit */}
             {editMode && (
@@ -769,7 +547,7 @@ export default function App() {
       )}
 
       <footer style={{ borderTop: "1px solid #e8ecf4", background: "#fff", padding: "18px 20px", textAlign: "center", marginTop: 36 }}>
-        <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>© 2025 CVPerfect.online · 18 Template-uri · AI Powered · RO & EN · Export PDF · ATS Optimizat</p>
+        <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>© 2025 CVPerfect.online · 18 Template-uri · RO · Export PDF · ATS Optimizat</p>
       </footer>
     </div>
   );
