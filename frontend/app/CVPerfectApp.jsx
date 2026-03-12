@@ -225,8 +225,24 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
                 {editMode
                   ? <EF value={exp.desc} onChange={v => setN("experienta", i, "desc", v)} multiline style={{ fontSize: 12.5, color: "#555", marginTop: 6 }} placeholder="Realizări separate cu •" />
                   : <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{exp.desc.split(" • ").map((it, j) => <li key={j} style={{ fontSize: 12.5, lineHeight: 1.6, color: "#555", marginBottom: 2 }}>{it}</li>)}</ul>}
+                {editMode && (
+                  <button
+                    onClick={() => setCvData(p => ({ ...p, experienta: p.experienta.filter((_, idx) => idx !== i) }))}
+                    style={{ marginTop: 6, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 11, padding: "2px 6px", borderRadius: 6, cursor: "pointer" }}
+                  >
+                    Șterge experiența
+                  </button>
+                )}
               </div>
             ))}
+            {editMode && (
+              <button
+                onClick={() => setCvData(p => ({ ...p, experienta: [...p.experienta, { firma: "", perioada: "", rol: "", desc: "" }] }))}
+                style={{ marginTop: 6, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11.5, padding: "6px 8px", borderRadius: 7, cursor: "pointer" }}
+              >
+                + Adaugă experiență
+              </button>
+            )}
           </Sec>
           <Sec title={labels.edu} color={color}>
             {cvData.educatie.map((edu, i) => (
@@ -265,27 +281,75 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
               return (
                 <div key={i} style={{ marginBottom: 9 }}>
                   {editMode ? <EF value={c} onChange={v => setL("competente", i, v)} style={{ fontSize: 12, fontWeight: 500, color: "#444" }} /> : <span style={{ fontSize: 12, fontWeight: 500, color: "#444" }}>{c}</span>}
+                  {editMode && (
+                    <button
+                      onClick={() => setCvData(p => ({ ...p, competente: p.competente.filter((_, idx) => idx !== i) }))}
+                      style={{ marginTop: 4, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer" }}
+                    >
+                      Șterge
+                    </button>
+                  )}
                   <div style={{ height: 3.5, background: "#e2e8f0", borderRadius: 2, marginTop: 3 }}>
                     <div style={{ height: "100%", width: `${skillWidths.current[c]}%`, background: color, borderRadius: 2 }} />
                   </div>
                 </div>
               );
             })}
+            {editMode && (
+              <button
+                onClick={() => setCvData(p => ({ ...p, competente: [...p.competente, ""] }))}
+                style={{ marginTop: 4, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11, padding: "5px 7px", borderRadius: 7, cursor: "pointer" }}
+              >
+                + Adaugă competență
+              </button>
+            )}
           </SideSec>
           <SideSec title={labels.limbi} color={color}>
             {cvData.limbi.map((l, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0, display: "inline-block" }} />
                 {editMode ? <EF value={l} onChange={v => setL("limbi", i, v)} style={{ fontSize: 12.5, color: "#555" }} /> : <span style={{ fontSize: 12.5, color: "#555" }}>{l}</span>}
+                {editMode && (
+                  <button
+                    onClick={() => setCvData(p => ({ ...p, limbi: p.limbi.filter((_, idx) => idx !== i) }))}
+                    style={{ border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer" }}
+                  >
+                    Șterge
+                  </button>
+                )}
               </div>
             ))}
+            {editMode && (
+              <button
+                onClick={() => setCvData(p => ({ ...p, limbi: [...p.limbi, ""] }))}
+                style={{ marginTop: 4, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11, padding: "5px 7px", borderRadius: 7, cursor: "pointer" }}
+              >
+                + Adaugă limbă
+              </button>
+            )}
           </SideSec>
           <SideSec title={labels.cert} color={color}>
             {cvData.certificari.map((c, i) => (
               <div key={i} style={{ marginBottom: 7, padding: "5px 9px", background: "#fff", borderRadius: 5, borderLeft: `3px solid ${color}` }}>
                 {editMode ? <EF value={c} onChange={v => setL("certificari", i, v)} style={{ fontSize: 11.5, color: "#555" }} /> : <span style={{ fontSize: 11.5, color: "#555" }}>{c}</span>}
+                {editMode && (
+                  <button
+                    onClick={() => setCvData(p => ({ ...p, certificari: p.certificari.filter((_, idx) => idx !== i) }))}
+                    style={{ marginTop: 4, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer" }}
+                  >
+                    Șterge
+                  </button>
+                )}
               </div>
             ))}
+            {editMode && (
+              <button
+                onClick={() => setCvData(p => ({ ...p, certificari: [...p.certificari, ""] }))}
+                style={{ marginTop: 4, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11, padding: "5px 7px", borderRadius: 7, cursor: "pointer" }}
+              >
+                + Adaugă certificare
+              </button>
+            )}
           </SideSec>
         </div>
       </div>
