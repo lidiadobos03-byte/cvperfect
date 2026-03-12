@@ -39,4 +39,10 @@ body {
   .cv-document-grid {
     grid-template-columns: 1fr !important;
   }
+  .mobile-only {
+    display: block !important;
+  }
+  .mobile-hidden {
+    display: none !important;
+  }
 }
