@@ -9,10 +9,9 @@
 1. Mergi la **stripe.com/dashboard**
 2. Click pe **Developers → API Keys**
 3. Copiază:
-   - `Publishable key` → pk_live_... (nu o folosim în backend)
    - **`Secret key`** → `sk_live_...` ← asta o pui în Render
 
-> ⚠️ Pentru teste folosește `sk_test_...` și `pk_test_...`
+> ⚠️ Pentru teste folosește `sk_test_...`
 
 ### 1b. Creează Webhook
 1. **Developers → Webhooks → Add endpoint**

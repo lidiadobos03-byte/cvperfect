@@ -32,7 +32,6 @@
 /.env
 
 Frontend (`frontend/.env`)
-- NEXT_PUBLIC_STRIPE_PUBLIC_KEY=
 - NEXT_PUBLIC_API_URL=https://backend-ul-tau.onrender.com
 
 Backend (`backend/.env`)
