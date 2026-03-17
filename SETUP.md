@@ -16,7 +16,7 @@
 
 ### 1b. Creează Webhook
 1. **Developers → Webhooks → Add endpoint**
-2. URL: `https://NUMELE-TÅU.onrender.com/webhook`
+2. URL: `https://NUMELE-TĂU.onrender.com/api/payments/webhook`
 3. Events: bifează **`checkout.session.completed`**
 4. Click **Add endpoint**
 5. Copiază **Signing secret** → `whsec_...` ← asta e `STRIPE_WEBHOOK_SECRET`
@@ -31,12 +31,12 @@
 
 ### 2a. Creează serviciul
 1. Mergi la **render.com → New → Web Service**
-2. Conectează repo-ul tău GitHub cu folderul `cvperfect-backend`
+2. Conectează repo-ul tău GitHub și setează serviciul cu `Root Directory = backend`
 3. Setări:
    - **Name**: `cvperfect-backend`
    - **Environment**: `Node`
-   - **Build Command**: `npm install`
-   - **Start Command**: `node server.js`
+   - **Build Command**: `npm install && npm run build`
+   - **Start Command**: `npm run start`
    - **Plan**: Free (suficient la început)
 
 ### 2b. Adaugă Environment Variables în Render
@@ -45,6 +45,7 @@ Click pe **Environment → Add Environment Variable**:
 ```
 STRIPE_SECRET_KEY      = sk_live_CHEIA_TA
 STRIPE_WEBHOOK_SECRET  = whsec_SECRETUL_TAU
+DOWNLOAD_TOKEN_SECRET  = o-cheie-lunga-random-pentru-download
 FRONTEND_URL           = https://cvperfect.online
 PORT                   = 4000
 ```
@@ -57,10 +58,9 @@ După deploy, Render îți dă un URL de forma:
 
 ## PASUL 3 — Actualizează Frontend (2 minute)
 
-În fișierul `cvperfect.jsx`, linia ~35, schimbă:
-```javascript
-const API_URL = "https://cvperfect-backend.onrender.com";
-// ^^^^^ pune URL-ul exact din Render
+În Render, la frontend, setează variabila:
+```bash
+NEXT_PUBLIC_API_URL=https://cvperfect-backend.onrender.com
 ```
 
 ---

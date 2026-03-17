@@ -3,6 +3,6 @@ import { createCheckoutSession } from "../controllers/paymentsController.js";
 
 const router = Router();
 
-router.post("/create-checkout-session", createCheckoutSession);
+router.post("/create-checkout", createCheckoutSession);
 
 export default router;

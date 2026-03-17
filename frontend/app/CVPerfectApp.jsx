@@ -1,31 +1,170 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useRef, useEffect } from "react";
 
-// ─── html2pdf loader ──────────────────────────────────────────────────────────
-function useHtml2pdf() {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    if (window.html2pdf) { setReady(true); return; }
-    const s = document.createElement("script");
-    s.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
-    s.onload = () => setReady(true);
-    document.head.appendChild(s);
-  }, []);
-  return ready;
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://cvperfect-backend.onrender.com";
+const PENDING_PURCHASE_STORAGE_KEY = "cvperfect.pendingPurchase";
+
+function normalizeString(value, maxLength = 4000) {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
 
-// ─── CONFIG ───────────────────────────────────────────────────────────────────
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://cvperfect-backend.onrender.com";
+function normalizeColor(value) {
+  const candidate = normalizeString(value, 16).toLowerCase();
+  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(candidate) ? candidate : "#1a56db";
+}
 
-// ─── CONFIG ───────────────────────────────────────────────────────────────────
+function normalizeLang(value) {
+  return normalizeString(value, 8).toLowerCase() === "en" ? "en" : "ro";
+}
 
-// ─── STRIPE PAYMENT HOOK ──────────────────────────────────────────────────────
+function normalizeStringList(value, maxItems = 32, maxLength = 240) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, maxItems).map(entry => normalizeString(entry, maxLength)).filter(Boolean);
+}
+
+function normalizeObjectList(value, keys, maxItems = 24, maxLength = 2400) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, maxItems).map(entry => {
+    const source = entry && typeof entry === "object" ? entry : {};
+    const normalized = {};
+    keys.forEach(key => {
+      normalized[key] = normalizeString(source[key], maxLength);
+    });
+    return normalized;
+  });
+}
+
+function normalizePhotoDataUrl(value) {
+  const dataUrl = normalizeString(value, 5_000_000);
+  if (!dataUrl) return "";
+  return /^data:image\/(png|jpeg|jpg);base64,[a-z0-9+/=]+$/i.test(dataUrl) ? dataUrl : "";
+}
+
+function stableSerialize(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(entry => stableSerialize(entry)).join(",")}]`;
+  }
+
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableSerialize(entryValue)}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value ?? null);
+}
+
+function normalizePdfPayload(payload) {
+  return {
+    templateName: normalizeString(payload?.templateName, 160),
+    color: normalizeColor(payload?.color),
+    lang: normalizeLang(payload?.lang),
+    photoDataUrl: normalizePhotoDataUrl(payload?.photoDataUrl),
+    cvData: {
+      nume: normalizeString(payload?.cvData?.nume, 160),
+      titlu: normalizeString(payload?.cvData?.titlu, 160),
+      email: normalizeString(payload?.cvData?.email, 160),
+      telefon: normalizeString(payload?.cvData?.telefon, 80),
+      oras: normalizeString(payload?.cvData?.oras, 120),
+      linkedin: normalizeString(payload?.cvData?.linkedin, 200),
+      despre: normalizeString(payload?.cvData?.despre, 8000),
+      experienta: normalizeObjectList(payload?.cvData?.experienta, ["firma", "perioada", "rol", "desc"], 24, 3000),
+      educatie: normalizeObjectList(payload?.cvData?.educatie, ["institutie", "perioada", "diploma"], 16, 1200),
+      competente: normalizeStringList(payload?.cvData?.competente, 32, 240),
+      limbi: normalizeStringList(payload?.cvData?.limbi, 16, 160),
+      certificari: normalizeStringList(payload?.cvData?.certificari, 24, 240),
+    },
+  };
+}
+
+async function sha256Hex(input) {
+  const encoded = new TextEncoder().encode(input);
+  const digest = await window.crypto.subtle.digest("SHA-256", encoded);
+  return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function createDocumentHash(payload) {
+  return sha256Hex(stableSerialize(normalizePdfPayload(payload)));
+}
+
+function cloneData(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function getSkillWidth(skill) {
+  const total = Array.from(skill || "").reduce((sum, character) => sum + character.charCodeAt(0), 0);
+  return 72 + (total % 26);
+}
+
+function savePendingPurchase(purchase) {
+  try {
+    localStorage.setItem(PENDING_PURCHASE_STORAGE_KEY, JSON.stringify(purchase));
+  } catch (error) {
+    console.error("Could not persist pending purchase", error);
+  }
+}
+
+function loadPendingPurchase() {
+  try {
+    const raw = localStorage.getItem(PENDING_PURCHASE_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (error) {
+    console.error("Could not read pending purchase", error);
+    return null;
+  }
+}
+
+function clearPendingPurchase() {
+  try {
+    localStorage.removeItem(PENDING_PURCHASE_STORAGE_KEY);
+  } catch (error) {
+    console.error("Could not clear pending purchase", error);
+  }
+}
+
+function parseFilenameFromDisposition(header) {
+  if (!header) return null;
+  const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1]);
+  const basicMatch = header.match(/filename="([^"]+)"/i);
+  return basicMatch?.[1] || null;
+}
+
 function useStripePayment() {
-  const [paid, setPaid] = useState(false);
+  const [paymentInfo, setPaymentInfo] = useState(null);
   const [checking, setChecking] = useState(false);
 
-  // La load, verifică dacă userul vine înapoi de la Stripe cu ?payment=success
+  const verifyPayment = async (sessionId) => {
+    const response = await fetch(`${API_URL}/verify-payment?session_id=${sessionId}`);
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.error || "Nu s-a putut verifica plata.");
+    }
+
+    if (data.paid && data.downloadToken) {
+      const nextPayment = {
+        sessionId: data.sessionId || sessionId,
+        documentHash: data.documentHash,
+        downloadToken: data.downloadToken,
+        expiresAt: data.expiresAt || null,
+      };
+      setPaymentInfo(nextPayment);
+      return nextPayment;
+    }
+
+    if (data.requiresNewCheckout) {
+      setPaymentInfo(null);
+      throw new Error("Checkout-ul vechi nu poate genera PDF-ul securizat. Repornește plata din editor.");
+    }
+
+    setPaymentInfo(null);
+    return null;
+  };
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const payment = params.get("payment");
@@ -33,44 +172,48 @@ function useStripePayment() {
 
     if (payment === "success" && sessionId) {
       setChecking(true);
-      fetch(`${API_URL}/verify-payment?session_id=${sessionId}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.paid) {
-            setPaid(true);
-            // Curăță URL-ul
-            window.history.replaceState({}, "", window.location.pathname);
-          }
+      verifyPayment(sessionId)
+        .then(() => {
+          window.history.replaceState({}, "", window.location.pathname);
         })
-        .catch(console.error)
+        .catch(error => {
+          console.error(error);
+          alert(error.message || "Nu s-a putut verifica plata.");
+        })
         .finally(() => setChecking(false));
     }
   }, []);
 
-  const startPayment = async (templateName, lang) => {
+  const startPayment = async ({ templateName, lang, documentHash }) => {
     try {
       const res = await fetch(`${API_URL}/create-checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ templateName, lang })
+        body: JSON.stringify({ templateName, lang, documentHash })
       });
       const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Eroare la inițierea plății.");
+      }
+
       if (data.url) {
-        window.location.href = data.url; // redirect la Stripe Checkout
+        window.location.href = data.url;
       } else {
         alert("Eroare la inițierea plății. Încearcă din nou.");
       }
     } catch (e) {
       console.error(e);
-      alert("Nu s-a putut conecta la server. Verifică conexiunea.");
+      alert(e.message || "Nu s-a putut conecta la server. Verifică conexiunea.");
     }
   };
 
-  return { paid, setPaid, checking, startPayment };
+  return { paymentInfo, checking, startPayment, verifyPayment };
 }
 
 // ─── PAYWALL MODAL ────────────────────────────────────────────────────────────
 function PaywallModal({ onClose, onPay, templateName, lang, color }) {
+  const langLabel = lang === "en" ? "English" : "Română 🇷🇴";
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.7)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ background: "#fff", borderRadius: 20, padding: 32, maxWidth: 420, width: "100%", boxShadow: "0 24px 64px rgba(0,0,0,0.25)", position: "relative" }}>
@@ -83,7 +226,7 @@ function PaywallModal({ onClose, onPay, templateName, lang, color }) {
         {/* Title */}
         <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 800, color: "#0f172a", textAlign: "center" }}>Descarcă CV-ul tău</h2>
         <p style={{ margin: "0 0 24px", fontSize: 14, color: "#64748b", textAlign: "center", lineHeight: 1.6 }}>
-          CV-ul tău profesional <strong>{templateName}</strong> (Română 🇷🇴) este gata de descărcat.
+          CV-ul tău profesional <strong>{templateName}</strong> ({langLabel}) este gata de descărcat.
         </p>
 
         {/* Price box */}
@@ -98,7 +241,7 @@ function PaywallModal({ onClose, onPay, templateName, lang, color }) {
           {[
             "✅ PDF profesional format A4 european",
             "✅ Optimizat ATS — trecut prin filtre HR",
-            "✅ Descărcare instant după plată",
+            "✅ PDF generat securizat pe server după plată",
             "✅ Plată securizată prin Stripe 🔒",
           ].map((b, i) => (
             <div key={i} style={{ fontSize: 13, color: "#374151", marginBottom: 8 }}>{b}</div>
@@ -166,8 +309,6 @@ function EditableTextMulti({ value, onChange, style, placeholder, editMode }) {
 
 // ─── CV DOCUMENT ──────────────────────────────────────────────────────────────
 function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode, lang }) {
-  const skillWidths = useRef({});
-  cvData.competente.forEach(c => { if (!skillWidths.current[c]) skillWidths.current[c] = 72 + Math.floor(Math.random() * 26); });
   const set = (k, v) => setCvData(p => ({ ...p, [k]: v }));
   const setN = (arr, i, f, v) => setCvData(p => { const a = JSON.parse(JSON.stringify(p[arr])); a[i][f] = v; return { ...p, [arr]: a }; });
   const setL = (arr, i, v) => setCvData(p => { const a = [...p[arr]]; a[i] = v; return { ...p, [arr]: a }; });
@@ -180,7 +321,7 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
       <div style={{ background: color, padding: "30px 42px 22px", display: "flex", alignItems: "center", gap: 24 }}>
         <div onClick={onPhotoClick} style={{ flexShrink: 0, cursor: "pointer" }}>
           {photoUrl
-            ? <img src={photoUrl} alt="foto" style={{ width: 96, height: 96, borderRadius: "50%", objectFit: "cover", border: "3px solid rgba(255,255,255,0.4)" }} />
+            ? <Image src={photoUrl} alt="foto" width={96} height={96} unoptimized style={{ width: 96, height: 96, borderRadius: "50%", objectFit: "cover", border: "3px solid rgba(255,255,255,0.4)" }} />
             : <div style={{ width: 96, height: 96, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "3px dashed rgba(255,255,255,0.5)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
                 <span style={{ fontSize: 24 }}>📷</span>
                 <span style={{ fontSize: 9, color: "rgba(255,255,255,0.8)", marginTop: 3 }}>Photo</span>
@@ -277,7 +418,7 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
         <div style={{ background: "#f7f8fa", padding: "22px 18px", borderLeft: "1px solid #eee" }}>
           <SideSec title={labels.comp} color={color}>
             {cvData.competente.map((c, i) => {
-              if (!skillWidths.current[c]) skillWidths.current[c] = 80;
+              const skillWidth = getSkillWidth(c);
               return (
                 <div key={i} style={{ marginBottom: 9 }}>
                   {editMode ? <EF value={c} onChange={v => setL("competente", i, v)} style={{ fontSize: 12, fontWeight: 500, color: "#444" }} /> : <span style={{ fontSize: 12, fontWeight: 500, color: "#444" }}>{c}</span>}
@@ -290,7 +431,7 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
                     </button>
                   )}
                   <div style={{ height: 3.5, background: "#e2e8f0", borderRadius: 2, marginTop: 3 }}>
-                    <div style={{ height: "100%", width: `${skillWidths.current[c]}%`, background: color, borderRadius: 2 }} />
+                    <div style={{ height: "100%", width: `${skillWidth}%`, background: color, borderRadius: 2 }} />
                   </div>
                 </div>
               );
@@ -403,12 +544,12 @@ function TemplateCard({ template, onSelect }) {
 const fBtn = { width: "100%", padding: "9px 14px", borderRadius: 9, cursor: "pointer", fontWeight: 600, fontSize: 12.5, textAlign: "center", boxSizing: "border-box" };
 
 export default function App() {
-  const pdfReady = useHtml2pdf();
-  const { paid, setPaid, checking, startPayment } = useStripePayment();
+  const { paymentInfo, checking, startPayment, verifyPayment } = useStripePayment();
   const [tmpl, setTmpl] = useState(null);
   const [cvRO, setCvRO] = useState(null);
   const lang = "ro";
   const [photo, setPhoto] = useState(null);
+  const [currentDocumentHash, setCurrentDocumentHash] = useState(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState("grid");
   const [editMode, setEditMode] = useState(false);
@@ -420,6 +561,9 @@ export default function App() {
 
   const cvData = cvRO;
   const setCvData = setCvRO;
+  const paidForCurrentDocument = Boolean(
+    paymentInfo && currentDocumentHash && paymentInfo.documentHash === currentDocumentHash
+  );
 
   const filtered = cvTemplates.filter(t =>
     t.job.toLowerCase().includes(search.toLowerCase()) ||
@@ -428,7 +572,7 @@ export default function App() {
 
   const select = (t) => {
     setTmpl(t);
-    setCvRO(JSON.parse(JSON.stringify(t.data)));
+    setCvRO(cloneData(t.data));
     setPhoto(null);
     setEditMode(false);
     setPage("editor");
@@ -436,38 +580,199 @@ export default function App() {
     window.scrollTo({ top: 0 });
   };
 
-  const onPhoto = (e) => { const f = e.target.files[0]; if (f) setPhoto(URL.createObjectURL(f)); };
+  useEffect(() => {
+    let cancelled = false;
 
-  const exportPDF = async () => {
-    if (!pdfReady || !window.html2pdf) return alert("Librăria PDF se încarcă, încearcă din nou.");
-    setExporting(true); setEditMode(false);
-    await new Promise(r => setTimeout(r, 350));
-    const el = document.getElementById("cv-document");
-    if (!el) { setExporting(false); return; }
-    const filename = `CV_${(cvData?.nume || "CV").replace(/ /g, "_")}_${lang.toUpperCase()}.pdf`;
-    try {
-      await window.html2pdf().set({
-        margin: 0, filename,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, allowTaint: true, logging: false, backgroundColor: "#ffffff" },
-        jsPDF: { unit: "px", format: [794, 1123], orientation: "portrait" }
-      }).from(el).save();
-    } catch(e) { console.error(e); alert("Eroare la export. Încearcă din nou."); }
-    setExporting(false);
+    if (!tmpl || !cvData) {
+      setCurrentDocumentHash(null);
+      return;
+    }
+
+    createDocumentHash({
+      templateName: tmpl.job,
+      color: tmpl.color,
+      lang,
+      cvData,
+      photoDataUrl: photo,
+    })
+      .then(hash => {
+        if (!cancelled) {
+          setCurrentDocumentHash(hash);
+        }
+      })
+      .catch(error => {
+        console.error(error);
+        if (!cancelled) {
+          setCurrentDocumentHash(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tmpl, cvData, photo, lang]);
+
+  useEffect(() => {
+    if (!paymentInfo?.downloadToken) return;
+
+    const pendingPurchase = loadPendingPurchase();
+    if (!pendingPurchase || pendingPurchase.documentHash !== paymentInfo.documentHash) {
+      return;
+    }
+
+    const restoredTemplate =
+      cvTemplates.find(template => template.id === pendingPurchase.templateId) ||
+      {
+        id: pendingPurchase.templateId || 0,
+        job: pendingPurchase.templateName || "CV",
+        color: pendingPurchase.color || "#1a56db",
+        icon: "📄",
+        data: pendingPurchase.cvData,
+      };
+
+    setTmpl(restoredTemplate);
+    setCvRO(cloneData(pendingPurchase.cvData));
+    setPhoto(pendingPurchase.photoDataUrl || null);
+    setEditMode(false);
+    setPage("editor");
+    setMobileView("cv");
+    window.scrollTo({ top: 0 });
+  }, [paymentInfo]);
+
+  const onPhoto = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!["image/png", "image/jpeg"].includes(file.type)) {
+      alert("Te rog încarcă o fotografie PNG sau JPEG.");
+      e.target.value = "";
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setPhoto(reader.result);
+      }
+    };
+    reader.onerror = () => {
+      alert("Nu am putut citi fotografia selectată.");
+    };
+    reader.readAsDataURL(file);
   };
 
-  // Dacă e plătit → descarcă direct. Dacă nu → arată paywall
-  const handleDownloadClick = () => {
-    if (paid) {
-      exportPDF();
-    } else {
+  const downloadPaidPdf = async (activePayment = paymentInfo, allowRefresh = true) => {
+    if (!activePayment || !tmpl || !cvData) {
       setShowPaywall(true);
+      return;
+    }
+
+    try {
+      const documentHash = await createDocumentHash({
+        templateName: tmpl.job,
+        color: tmpl.color,
+        lang,
+        cvData,
+        photoDataUrl: photo,
+      });
+
+      if (documentHash !== activePayment.documentHash) {
+        setShowPaywall(true);
+        return;
+      }
+
+      setExporting(true);
+      setEditMode(false);
+
+      const response = await fetch(`${API_URL}/download-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          downloadToken: activePayment.downloadToken,
+          templateName: tmpl.job,
+          color: tmpl.color,
+          lang,
+          cvData,
+          photoDataUrl: photo,
+        }),
+      });
+
+      if (response.status === 403 && allowRefresh && activePayment.sessionId) {
+        const refreshedPayment = await verifyPayment(activePayment.sessionId).catch(() => null);
+        if (refreshedPayment?.documentHash === documentHash) {
+          setExporting(false);
+          return downloadPaidPdf(refreshedPayment, false);
+        }
+      }
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Eroare la generarea PDF-ului.");
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition");
+      const fallbackFilename = `CV_${(cvData?.nume || "CV").replace(/ /g, "_")}_${lang.toUpperCase()}.pdf`;
+      const filename = parseFilenameFromDisposition(disposition) || fallbackFilename;
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      clearPendingPurchase();
+    } catch (error) {
+      console.error(error);
+      alert(error.message || "Eroare la generarea PDF-ului.");
+    } finally {
+      setExporting(false);
     }
   };
 
-  const handlePayNow = () => {
-    setShowPaywall(false);
-    startPayment(tmpl?.job || "CV", lang);
+  const handleDownloadClick = async () => {
+    if (paymentInfo) {
+      await downloadPaidPdf();
+      return;
+    }
+
+    setShowPaywall(true);
+  };
+
+  const handlePayNow = async () => {
+    if (!tmpl || !cvData) return;
+
+    try {
+      setShowPaywall(false);
+      const documentHash = await createDocumentHash({
+        templateName: tmpl.job,
+        color: tmpl.color,
+        lang,
+        cvData,
+        photoDataUrl: photo,
+      });
+
+      savePendingPurchase({
+        templateId: tmpl.id,
+        templateName: tmpl.job,
+        color: tmpl.color,
+        lang,
+        cvData,
+        photoDataUrl: photo,
+        documentHash,
+        savedAt: Date.now(),
+      });
+
+      await startPayment({
+        templateName: tmpl.job,
+        lang,
+        documentHash,
+      });
+    } catch (error) {
+      console.error(error);
+      alert(error.message || "Nu s-a putut pregăti plata.");
+    }
   };
 
   return (
@@ -485,10 +790,12 @@ export default function App() {
       )}
 
       {/* ── SUCCESS BANNER (după plată) ── */}
-      {paid && (
+      {paymentInfo && (
         <div style={{ background: "linear-gradient(90deg, #059669, #0d9488)", padding: "10px 20px", textAlign: "center" }}>
           <span style={{ fontSize: 14, color: "#fff", fontWeight: 700 }}>
-            🎉 Plată confirmată! Poți descărca CV-ul oricând. Apasă butonul PDF din dreapta.
+            {paidForCurrentDocument
+              ? "🎉 Plată confirmată! Poți descărca PDF-ul securizat pentru documentul salvat."
+              : "🎉 Plata este confirmată, dar PDF-ul se deblochează doar pentru versiunea CV-ului pe care ai achitat-o."}
           </span>
         </div>
       )}
@@ -541,12 +848,12 @@ export default function App() {
               </button>
               {editMode && <button onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 2000); }} style={nb(saved ? "#059669" : "#bbf7d0", saved ? "#059669" : "#f0fdf4", saved ? "#fff" : "#059669", 700)}>{saved ? "✓ Salvat!" : "💾 Salvează"}</button>}
               <button onClick={handleDownloadClick} disabled={exporting}
-                style={{ padding: "7px 16px", borderRadius: 8, background: paid ? "linear-gradient(135deg,#059669,#0d9488)" : exporting ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", cursor: exporting ? "not-allowed" : "pointer", fontWeight: 800, fontSize: 12.5, boxShadow: exporting ? "none" : `0 3px 10px ${tmpl.color}44` }}>
-                {exporting ? "⏳..." : paid ? "⬇️ PDF RO ✓" : "🔒 PDF RO — 19 RON"}
+                style={{ padding: "7px 16px", borderRadius: 8, background: paidForCurrentDocument ? "linear-gradient(135deg,#059669,#0d9488)" : exporting ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", cursor: exporting ? "not-allowed" : "pointer", fontWeight: 800, fontSize: 12.5, boxShadow: exporting ? "none" : `0 3px 10px ${tmpl.color}44` }}>
+                {exporting ? "⏳..." : paidForCurrentDocument ? "⬇️ PDF Securizat ✓" : "🔒 PDF RO — 19 RON"}
               </button>
             </div>
           )}
-          <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onPhoto} />
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg" style={{ display: "none" }} onChange={onPhoto} />
         </div>
       </header>
 
@@ -588,7 +895,7 @@ export default function App() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(288px, 1fr))", gap: 16 }}>
             {filtered.map(t => <TemplateCard key={t.id} template={t} onSelect={select} />)}
           </div>
-          {!filtered.length && <div style={{ textAlign: "center", padding: "52px 0", color: "#94a3b8" }}><div style={{ fontSize: 40 }}>🔍</div><p>Nu s-au găsit template-uri pentru "{search}"</p></div>}
+          {!filtered.length && <div style={{ textAlign: "center", padding: "52px 0", color: "#94a3b8" }}><div style={{ fontSize: 40 }}>🔍</div><p>Nu s-au găsit template-uri pentru &quot;{search}&quot;</p></div>}
         </div>
       )}
 
@@ -634,15 +941,15 @@ export default function App() {
                 <button onClick={() => fileRef.current.click()} style={{ ...fBtn, background: photo ? "#f0fdf4" : "#f0f9ff", color: photo ? "#059669" : "#0369a1", border: `1.5px solid ${photo ? "#bbf7d0" : "#bae6fd"}` }}>
                   {photo ? "✓ Fotografie adăugată" : "📷 Adaugă fotografia ta"}
                 </button>
-                {photo && <div style={{ textAlign: "center" }}><img src={photo} alt="" style={{ width: 52, height: 52, borderRadius: "50%", objectFit: "cover", border: `3px solid ${tmpl.color}` }} /></div>}
+                {photo && <div style={{ textAlign: "center" }}><Image src={photo} alt="previzualizare fotografie" width={52} height={52} unoptimized style={{ width: 52, height: 52, borderRadius: "50%", objectFit: "cover", border: `3px solid ${tmpl.color}` }} /></div>}
 
                 <button onClick={() => setEditMode(e => !e)} style={{ ...fBtn, background: editMode ? "#fffbeb" : "#f8fafc", color: editMode ? "#b45309" : "#374151", border: `1.5px solid ${editMode ? "#fcd34d" : "#e2e8f0"}`, fontWeight: 700 }}>
                   {editMode ? "👁 Ieși din editare" : "✏️ Editează CV-ul"}
                 </button>
 
                 <button onClick={handleDownloadClick} disabled={exporting}
-                  style={{ ...fBtn, padding: "12px", background: paid ? "linear-gradient(135deg,#059669,#0d9488)" : exporting ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", fontWeight: 800, fontSize: 14, cursor: exporting ? "not-allowed" : "pointer", boxShadow: exporting ? "none" : `0 4px 14px ${tmpl.color}44` }}>
-                  {exporting ? "⏳ Generare PDF..." : paid ? "⬇️ Descarcă PDF RO (plătit ✓)" : "🔒 Descarcă PDF — 19 RON"}
+                  style={{ ...fBtn, padding: "12px", background: paidForCurrentDocument ? "linear-gradient(135deg,#059669,#0d9488)" : exporting ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", fontWeight: 800, fontSize: 14, cursor: exporting ? "not-allowed" : "pointer", boxShadow: exporting ? "none" : `0 4px 14px ${tmpl.color}44` }}>
+                  {exporting ? "⏳ Generare PDF..." : paidForCurrentDocument ? "⬇️ Descarcă PDF securizat ✓" : "🔒 Descarcă PDF — 19 RON"}
                 </button>
               </div>
             </div>

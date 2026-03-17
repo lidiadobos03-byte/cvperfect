@@ -33,11 +33,12 @@
 
 Frontend (`frontend/.env`)
 - NEXT_PUBLIC_STRIPE_PUBLIC_KEY=
-- API_URL=https://backend-ul-tau.onrender.com
+- NEXT_PUBLIC_API_URL=https://backend-ul-tau.onrender.com
 
 Backend (`backend/.env`)
 - STRIPE_SECRET_KEY=
 - STRIPE_WEBHOOK_SECRET=
+- DOWNLOAD_TOKEN_SECRET=
 - FRONTEND_URL=https://cvperfect.online
 
 ## Deploy pe Render
@@ -47,4 +48,4 @@ Vei avea doua servicii:
 - Backend -> Web Service (Node)
 
 Domeniul il conectam la frontend.
-Backend-ul il legam prin `API_URL` in frontend.
+Backend-ul il legam prin `NEXT_PUBLIC_API_URL` in frontend.

@@ -2,7 +2,14 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import bodyParser from "body-parser";
-import { getStripeClient } from "./utils/stripe";
+import { getStripeClient } from "./utils/stripe.js";
+import {
+  createDocumentHash,
+  createDownloadToken,
+  sanitizeFilename,
+  verifyDownloadToken,
+} from "./utils/downloadAuth.js";
+import { generatePdf } from "./utils/pdf.js";
 
 dotenv.config();
 
@@ -52,13 +59,22 @@ app.post(
 );
 
 // Pentru restul API-ului folosim JSON normal
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "10mb" }));
 
 // ─── POST /create-checkout ────────────────────────────────────────────────────
 app.post("/create-checkout", async (req, res) => {
   try {
     const stripe = getStripeClient();
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    const documentHash = req.body?.documentHash;
+
+    if (
+      typeof documentHash !== "string" ||
+      !/^[a-f0-9]{64}$/i.test(documentHash)
+    ) {
+      return res.status(400).json({ error: "Missing or invalid documentHash" });
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
@@ -79,6 +95,7 @@ app.post("/create-checkout", async (req, res) => {
       metadata: {
         templateName: req.body?.templateName || "CV",
         lang: req.body?.lang || "ro",
+        documentHash,
       },
     });
 
@@ -100,10 +117,103 @@ app.get("/verify-payment", async (req, res) => {
     const stripe = getStripeClient();
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     const paid = session.payment_status === "paid";
-    res.json({ paid });
+
+    if (!paid) {
+      return res.json({ paid: false });
+    }
+
+    const documentHash = session.metadata?.documentHash;
+
+    if (!documentHash) {
+      return res.json({
+        paid: true,
+        requiresNewCheckout: true,
+        error: "This checkout session does not contain a secure document hash.",
+      });
+    }
+
+    const tokenData = createDownloadToken(session.id, documentHash);
+
+    res.json({
+      paid: true,
+      sessionId: session.id,
+      documentHash,
+      downloadToken: tokenData.token,
+      expiresAt: tokenData.expiresAt,
+      templateName: session.metadata?.templateName || "CV",
+      lang: session.metadata?.lang || "ro",
+    });
   } catch (error) {
     console.error("Verify payment error:", error);
     res.status(500).json({ error: "Verify payment error" });
+  }
+});
+
+app.post("/download-pdf", async (req, res) => {
+  try {
+    const { downloadToken, templateName, lang, color, cvData, photoDataUrl } =
+      req.body ?? {};
+
+    if (typeof downloadToken !== "string") {
+      return res.status(400).json({ error: "Missing download token" });
+    }
+
+    const tokenPayload = verifyDownloadToken(downloadToken);
+
+    if (!tokenPayload) {
+      return res
+        .status(403)
+        .json({ error: "Invalid or expired download token" });
+    }
+
+    const documentHash = createDocumentHash({
+      templateName,
+      color,
+      lang,
+      cvData,
+      photoDataUrl,
+    });
+
+    if (documentHash !== tokenPayload.documentHash) {
+      return res.status(403).json({
+        error: "This token only works for the paid CV snapshot.",
+      });
+    }
+
+    const stripe = getStripeClient();
+    const session = await stripe.checkout.sessions.retrieve(tokenPayload.sessionId);
+
+    if (session.payment_status !== "paid") {
+      return res.status(403).json({ error: "Payment not confirmed" });
+    }
+
+    if (session.metadata?.documentHash !== documentHash) {
+      return res.status(403).json({
+        error: "The current CV does not match the paid checkout session.",
+      });
+    }
+
+    const pdfBuffer = await generatePdf({
+      templateName,
+      color,
+      lang,
+      cvData,
+      photoDataUrl,
+    });
+    const filename = sanitizeFilename(
+      `CV_${String(cvData?.nume || templateName || "CV")}_${String(
+        lang || "ro"
+      ).toUpperCase()}.pdf`
+    );
+
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Length", pdfBuffer.length.toString());
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error("Download PDF error:", error);
+    res.status(500).json({ error: "Could not generate PDF" });
   }
 });
 

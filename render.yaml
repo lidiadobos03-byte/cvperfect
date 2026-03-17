@@ -11,7 +11,7 @@ services:
         value: "20"
       - key: NEXT_PUBLIC_STRIPE_PUBLIC_KEY
         sync: false
-      - key: API_URL
+      - key: NEXT_PUBLIC_API_URL
         sync: false
 
   - type: web
@@ -27,6 +27,8 @@ services:
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: DOWNLOAD_TOKEN_SECRET
         sync: false
       - key: FRONTEND_URL
         sync: false
