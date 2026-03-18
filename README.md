@@ -42,7 +42,7 @@ Backend (`backend/.env`)
 
 ## Deploy pe Render
 
-Vei avea doua servicii:
+Avem doua servicii:
 - Frontend -> Static Site sau Web Service (Next.js)
 - Backend -> Web Service (Node)
 
