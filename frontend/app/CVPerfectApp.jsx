@@ -136,6 +136,35 @@ function parseFilenameFromDisposition(header) {
 function useStripePayment() {
   const [paymentInfo, setPaymentInfo] = useState(null);
   const [checking, setChecking] = useState(false);
+  const [startingCheckout, setStartingCheckout] = useState(false);
+  const warmupPromiseRef = useRef(null);
+  const lastWarmupAtRef = useRef(0);
+
+  const warmCheckout = async () => {
+    const now = Date.now();
+
+    if (warmupPromiseRef.current) {
+      return warmupPromiseRef.current;
+    }
+
+    if (lastWarmupAtRef.current && now - lastWarmupAtRef.current < 4 * 60 * 1000) {
+      return null;
+    }
+
+    warmupPromiseRef.current = fetch(`${API_URL}/health`, {
+      cache: "no-store",
+    })
+      .catch(error => {
+        console.warn("Checkout warm-up failed", error);
+        return null;
+      })
+      .finally(() => {
+        lastWarmupAtRef.current = Date.now();
+        warmupPromiseRef.current = null;
+      });
+
+    return warmupPromiseRef.current;
+  };
 
   const verifyPayment = async (sessionId) => {
     const response = await fetch(`${API_URL}/verify-payment?session_id=${sessionId}`);
@@ -185,7 +214,11 @@ function useStripePayment() {
   }, []);
 
   const startPayment = async ({ templateName, lang, documentHash }) => {
+    setStartingCheckout(true);
+
     try {
+      await warmCheckout();
+
       const res = await fetch(`${API_URL}/create-checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -205,20 +238,22 @@ function useStripePayment() {
     } catch (e) {
       console.error(e);
       alert(e.message || "Nu s-a putut conecta la server. Verifică conexiunea.");
+    } finally {
+      setStartingCheckout(false);
     }
   };
 
-  return { paymentInfo, checking, startPayment, verifyPayment };
+  return { paymentInfo, checking, startPayment, verifyPayment, startingCheckout, warmCheckout };
 }
 
 // ─── PAYWALL MODAL ────────────────────────────────────────────────────────────
-function PaywallModal({ onClose, onPay, templateName, lang, color }) {
+function PaywallModal({ onClose, onPay, templateName, lang, color, isPaying }) {
   const langLabel = lang === "en" ? "English" : "Română 🇷🇴";
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.7)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ background: "#fff", borderRadius: 20, padding: 32, maxWidth: 420, width: "100%", boxShadow: "0 24px 64px rgba(0,0,0,0.25)", position: "relative" }}>
         {/* Close */}
-        <button onClick={onClose} style={{ position: "absolute", top: 16, right: 16, background: "#f1f5f9", border: "none", width: 32, height: 32, borderRadius: "50%", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+        <button onClick={onClose} disabled={isPaying} style={{ position: "absolute", top: 16, right: 16, background: "#f1f5f9", border: "none", width: 32, height: 32, borderRadius: "50%", cursor: isPaying ? "not-allowed" : "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", opacity: isPaying ? 0.55 : 1 }}>✕</button>
 
         {/* Icon */}
         <div style={{ width: 64, height: 64, borderRadius: 16, background: `linear-gradient(135deg, ${color}, #7c3aed)`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", fontSize: 30 }}>📄</div>
@@ -249,10 +284,16 @@ function PaywallModal({ onClose, onPay, templateName, lang, color }) {
         </div>
 
         {/* Pay button */}
-        <button onClick={onPay}
-          style={{ width: "100%", padding: "14px", borderRadius: 12, background: `linear-gradient(135deg, ${color}, #7c3aed)`, color: "#fff", border: "none", cursor: "pointer", fontWeight: 800, fontSize: 16, boxShadow: `0 6px 20px ${color}50`, marginBottom: 12 }}>
-          💳 Plătește 19 RON & Descarcă
+        <button onClick={onPay} disabled={isPaying}
+          style={{ width: "100%", padding: "14px", borderRadius: 12, background: isPaying ? "#94a3b8" : `linear-gradient(135deg, ${color}, #7c3aed)`, color: "#fff", border: "none", cursor: isPaying ? "wait" : "pointer", fontWeight: 800, fontSize: 16, boxShadow: isPaying ? "none" : `0 6px 20px ${color}50`, marginBottom: 12 }}>
+          {isPaying ? "⏳ Se conectează la Stripe..." : "💳 Plătește 19 RON & Descarcă"}
         </button>
+
+        {isPaying && (
+          <p style={{ margin: "0 0 12px", fontSize: 12, color: "#64748b", textAlign: "center", lineHeight: 1.5 }}>
+            Prima deschidere poate dura puțin dacă backend-ul se trezește din standby.
+          </p>
+        )}
 
         <p style={{ margin: 0, fontSize: 11, color: "#94a3b8", textAlign: "center" }}>
           🔒 Plată securizată prin Stripe · Visa, Mastercard, Google Pay
@@ -284,6 +325,390 @@ const cvTemplates = [
   { id: 18, job: "Social Media Manager", color: "#e11d74", icon: "📱", data: { nume: "Florescu Ioana", titlu: "Social Media Manager / Digital Content Creator", email: "ioana.florescu@email.ro", telefon: "0731 112 233", oras: "București", linkedin: "linkedin.com/in/ioana-florescu-smm", despre: "Social Media Manager cu 5 ani experiență în crearea și gestionarea brandurilor digitale pe Instagram, TikTok, Facebook și LinkedIn. Expert în content strategy, paid social și influencer marketing. Am crescut comunități de la 0 la 150K followeri organici și am generat campanii cu ROAS de 4.8x pentru clienți din e-commerce, beauty și lifestyle.", experienta: [{ firma: "Notino România", perioada: "2022 – Prezent", rol: "Senior Social Media Manager", desc: "Gestionarea canalelor Instagram (280K), TikTok (190K), Facebook (420K) • Creștere organică +85% followeri în 18 luni prin strategie de conținut video-first • Campanii paid social cu buget lunar 60.000 RON – ROAS mediu 4.8x • Coordonarea a 15+ colaborări cu influenceri (nano, micro, macro)" }, { firma: "Agenție iCreativ Digital", perioada: "2019 – 2022", rol: "Social Media Specialist", desc: "Managementul conturilor social media pentru 12 branduri simultan • Crearea calendarelor editoriale și producerea conținutului (foto, video, Reels, TikTok) • Raportare lunară KPI: reach, engagement rate, CTR, conversii • Implementare strategii de creștere organică – medie +3.200 followeri/lună per cont" }], educatie: [{ institutie: "Universitatea din București", perioada: "2015 – 2019", diploma: "Licență – Marketing & Comunicare" }], competente: ["Instagram & TikTok Strategy", "Meta Ads Manager (avansat)", "Content Creation & Reels", "Canva & Adobe Express", "Influencer Marketing", "Google Analytics 4", "Copywriting & Storytelling", "Community Management"], limbi: ["Română (nativă)", "Engleză (C1 – fluent)", "Italiană (A2)"], certificari: ["Meta Certified Digital Marketing Associate", "Google Analytics Individual Qualification", "HubSpot Social Media Certification – 2023", "Curs TikTok Ads for Business – 2023"] } },
 ];
 
+const DESIGN_PRESETS = [
+  { id: 1, key: "nordic-slate", name: "Nordic Slate", variant: "classic", color: "#1f4fd6", icon: "🧭", tagline: "Clean, clar, foarte ATS-friendly", previewStarterId: 1 },
+  { id: 2, key: "executive-pulse", name: "Executive Pulse", variant: "executive", color: "#0f766e", icon: "🏛️", tagline: "Serios, premium, pentru roluri corporate", previewStarterId: 2 },
+  { id: 3, key: "soft-column", name: "Soft Column", variant: "soft", color: "#0ea5e9", icon: "🌿", tagline: "Luminos si echilibrat, usor de parcurs", previewStarterId: 3 },
+  { id: 4, key: "atlas-sidebar", name: "Atlas Sidebar", variant: "sidebar", color: "#dc2626", icon: "🗂️", tagline: "Sidebar puternic, personalitate vizuala", previewStarterId: 4 },
+  { id: 5, key: "ivory-serif", name: "Ivory Serif", variant: "serif", color: "#b45309", icon: "🖋️", tagline: "Editorial, elegant, aerisit", previewStarterId: 5 },
+  { id: 6, key: "mono-grid", name: "Mono Grid", variant: "minimal", color: "#7c3aed", icon: "📐", tagline: "Minimal modern, focus pe informatie", previewStarterId: 6 },
+  { id: 7, key: "cobalt-line", name: "Cobalt Line", variant: "classic", color: "#2563eb", icon: "📎", tagline: "Accent clar si ritm bun pe sectiuni", previewStarterId: 7 },
+  { id: 8, key: "amber-board", name: "Amber Board", variant: "executive", color: "#d97706", icon: "📊", tagline: "Boardroom look pentru senioritate", previewStarterId: 8 },
+  { id: 9, key: "mint-balance", name: "Mint Balance", variant: "soft", color: "#059669", icon: "🍃", tagline: "Prietenos, modern, foarte lizibil", previewStarterId: 9 },
+  { id: 10, key: "ruby-rail", name: "Ruby Rail", variant: "sidebar", color: "#be123c", icon: "🚇", tagline: "Structura ferma si contrast puternic", previewStarterId: 10 },
+  { id: 11, key: "linen-story", name: "Linen Story", variant: "serif", color: "#92400e", icon: "📚", tagline: "Clasic, cald, inspirat editorial", previewStarterId: 11 },
+  { id: 12, key: "graph-paper", name: "Graph Paper", variant: "minimal", color: "#0891b2", icon: "🧩", tagline: "Curat, tehnic, fara zgomot vizual", previewStarterId: 12 },
+  { id: 13, key: "ocean-brief", name: "Ocean Brief", variant: "classic", color: "#0f766e", icon: "🌊", tagline: "Business modern cu accent calm", previewStarterId: 13 },
+  { id: 14, key: "charcoal-deck", name: "Charcoal Deck", variant: "executive", color: "#334155", icon: "🗃️", tagline: "Elegant si sobru pentru decizie rapida", previewStarterId: 14 },
+  { id: 15, key: "sage-panel", name: "Sage Panel", variant: "soft", color: "#65a30d", icon: "🌱", tagline: "Aerisit, calm, modern si proaspat", previewStarterId: 15 },
+  { id: 16, key: "violet-edge", name: "Violet Edge", variant: "sidebar", color: "#7c3aed", icon: "🪄", tagline: "Mai indraznet, cu margine vizuala clara", previewStarterId: 16 },
+  { id: 17, key: "sandstone-classic", name: "Sandstone Classic", variant: "serif", color: "#a16207", icon: "🏺", tagline: "Clasic premium, potrivit pentru consultanti", previewStarterId: 17 },
+  { id: 18, key: "neon-brief", name: "Neon Brief", variant: "minimal", color: "#06b6d4", icon: "⚡", tagline: "Sharp, tech-first, foarte direct", previewStarterId: 18 },
+];
+
+const designCatalog = DESIGN_PRESETS.map((preset) => {
+  const previewStarter =
+    cvTemplates.find((template) => template.id === preset.previewStarterId) ||
+    cvTemplates[0];
+
+  return {
+    ...preset,
+    previewData: previewStarter?.data || null,
+    previewRole: previewStarter?.job || "Rol",
+  };
+});
+
+function createEmptyCvData(roleName) {
+  const normalizedRole = normalizeString(roleName, 160);
+
+  return {
+    nume: "",
+    titlu: normalizedRole,
+    email: "",
+    telefon: "",
+    oras: "",
+    linkedin: "",
+    despre: "",
+    experienta: [],
+    educatie: [],
+    competente: [],
+    limbi: [],
+    certificari: [],
+  };
+}
+
+function getDesignVariantLabel(variant) {
+  return {
+    classic: "ATS Clean",
+    executive: "Executive",
+    soft: "Soft Modern",
+    sidebar: "Sidebar Bold",
+    serif: "Editorial",
+    minimal: "Minimal",
+  }[variant] || "Modern";
+}
+
+const DESIGN_THEME_OVERRIDES = {
+  "nordic-slate": {
+    headerBackground: "linear-gradient(135deg, #183a8a 0%, #1f4fd6 56%, #60a5fa 100%)",
+    shellShadow: "0 24px 60px rgba(31,79,214,0.14)",
+    photoShape: "circle",
+    contactChipMode: "glass",
+  },
+  "executive-pulse": {
+    headerBackground: "linear-gradient(135deg, #0b1220 0%, #0f172a 42%, #0f766e 100%)",
+    shellRadius: 14,
+    shellShadow: "0 24px 58px rgba(15,118,110,0.16)",
+    photoShape: "square",
+    contactChipMode: "outline",
+  },
+  "soft-column": {
+    headerBackground: "radial-gradient(circle at top left, #ffffff 0%, #d9fbff 28%, #ffffff 76%)",
+    shellRadius: 26,
+    shellShadow: "0 20px 52px rgba(14,165,233,0.10)",
+    photoShape: "rounded",
+    contactChipMode: "soft",
+  },
+  "atlas-sidebar": {
+    headerBackground: "linear-gradient(135deg, #0f172a 0%, #1f2937 70%, #dc2626 160%)",
+    sidebarBackground: "repeating-linear-gradient(180deg, rgba(220,38,38,0.12) 0px, rgba(220,38,38,0.12) 28px, rgba(255,255,255,0.0) 28px, rgba(255,255,255,0.0) 56px), linear-gradient(180deg, rgba(220,38,38,0.16), rgba(220,38,38,0.04))",
+    shellRadius: 18,
+    shellShadow: "0 22px 54px rgba(220,38,38,0.12)",
+    photoShape: "square",
+    contactChipMode: "glass",
+  },
+  "ivory-serif": {
+    documentBackground: "#fffaf2",
+    headerBackground: "linear-gradient(180deg, #f9f1e2 0%, #fffaf2 100%)",
+    shellRadius: 10,
+    shellShadow: "0 20px 46px rgba(180,83,9,0.10)",
+    photoShape: "rounded",
+    contactChipMode: "outline",
+  },
+  "mono-grid": {
+    documentBackground: "#ffffff",
+    headerBackground: "linear-gradient(180deg, #ffffff 0%, #ffffff 72%, rgba(124,58,237,0.08) 100%)",
+    shellRadius: 8,
+    shellShadow: "0 18px 44px rgba(124,58,237,0.10)",
+    photoShape: "square",
+    contactChipMode: "outline",
+  },
+  "cobalt-line": {
+    headerBackground: "linear-gradient(135deg, #1e3a8a 0%, #2563eb 65%, #60a5fa 100%)",
+    shellShadow: "0 22px 52px rgba(37,99,235,0.14)",
+    photoShape: "circle",
+    contactChipMode: "glass",
+  },
+  "amber-board": {
+    headerBackground: "linear-gradient(135deg, #1c1917 0%, #292524 48%, #d97706 130%)",
+    shellRadius: 12,
+    shellShadow: "0 24px 56px rgba(217,119,6,0.16)",
+    photoShape: "soft-square",
+    contactChipMode: "outline",
+  },
+  "mint-balance": {
+    headerBackground: "radial-gradient(circle at top left, #ffffff 0%, #dcfce7 24%, #ffffff 74%)",
+    sidebarBackground: "linear-gradient(180deg, rgba(5,150,105,0.14), rgba(255,255,255,0.0) 68%)",
+    shellRadius: 28,
+    shellShadow: "0 20px 50px rgba(5,150,105,0.10)",
+    photoShape: "circle",
+    contactChipMode: "soft",
+  },
+  "ruby-rail": {
+    headerBackground: "linear-gradient(135deg, #111827 0%, #4c0519 42%, #be123c 100%)",
+    sidebarBackground: "linear-gradient(180deg, rgba(190,18,60,0.18), rgba(190,18,60,0.04))",
+    shellRadius: 20,
+    shellShadow: "0 22px 54px rgba(190,18,60,0.14)",
+    photoShape: "square",
+    contactChipMode: "glass",
+  },
+  "linen-story": {
+    documentBackground: "#fffdf8",
+    headerBackground: "linear-gradient(180deg, #fbf2e7 0%, #fffdf8 100%)",
+    shellRadius: 6,
+    shellShadow: "0 18px 42px rgba(146,64,14,0.10)",
+    photoShape: "rounded",
+    contactChipMode: "soft",
+  },
+  "graph-paper": {
+    documentBackground: "#fcfeff",
+    headerBackground: "linear-gradient(180deg, #ffffff 0%, #ffffff 72%, rgba(8,145,178,0.08) 100%)",
+    shellRadius: 6,
+    shellShadow: "0 18px 42px rgba(8,145,178,0.10)",
+    photoShape: "square",
+    contactChipMode: "outline",
+  },
+  "ocean-brief": {
+    headerBackground: "linear-gradient(135deg, #115e59 0%, #0f766e 54%, #5eead4 140%)",
+    shellShadow: "0 22px 52px rgba(15,118,110,0.14)",
+    photoShape: "circle",
+    contactChipMode: "glass",
+  },
+  "charcoal-deck": {
+    headerBackground: "linear-gradient(135deg, #0f172a 0%, #1f2937 56%, #334155 100%)",
+    shellRadius: 12,
+    shellShadow: "0 22px 52px rgba(51,65,85,0.16)",
+    photoShape: "soft-square",
+    contactChipMode: "outline",
+  },
+  "sage-panel": {
+    headerBackground: "radial-gradient(circle at top left, #ffffff 0%, #ecfccb 26%, #ffffff 74%)",
+    sidebarBackground: "linear-gradient(180deg, rgba(101,163,13,0.14), rgba(255,255,255,0.0) 70%)",
+    shellRadius: 30,
+    shellShadow: "0 20px 50px rgba(101,163,13,0.10)",
+    photoShape: "rounded",
+    contactChipMode: "soft",
+  },
+  "violet-edge": {
+    headerBackground: "linear-gradient(135deg, #2e1065 0%, #7c3aed 55%, #c4b5fd 100%)",
+    sidebarBackground: "linear-gradient(180deg, rgba(124,58,237,0.18), rgba(124,58,237,0.04))",
+    shellRadius: 22,
+    shellShadow: "0 22px 54px rgba(124,58,237,0.16)",
+    photoShape: "square",
+    contactChipMode: "glass",
+  },
+  "sandstone-classic": {
+    documentBackground: "#fffaf5",
+    headerBackground: "linear-gradient(180deg, #f6ead8 0%, #fffaf5 100%)",
+    shellRadius: 8,
+    shellShadow: "0 18px 42px rgba(161,98,7,0.10)",
+    photoShape: "rounded",
+    contactChipMode: "outline",
+  },
+  "neon-brief": {
+    documentBackground: "#fbfeff",
+    headerBackground: "linear-gradient(180deg, #ffffff 0%, #ffffff 68%, rgba(6,182,212,0.08) 100%)",
+    shellRadius: 10,
+    shellShadow: "0 18px 42px rgba(6,182,212,0.10)",
+    photoShape: "soft-square",
+    contactChipMode: "outline",
+  },
+};
+
+function getDesignTheme(design) {
+  const color = design?.color || "#1a56db";
+  let baseTheme;
+
+  switch (design?.variant) {
+    case "executive":
+      baseTheme = {
+        fontFamily: "'Segoe UI', Arial, sans-serif",
+        documentBackground: "#ffffff",
+        shellBorder: `1px solid ${color}18`,
+        shellShadow: "0 20px 48px rgba(15,23,42,0.08)",
+        shellRadius: 18,
+        headerBackground: "linear-gradient(135deg, #0f172a, #1e293b)",
+        headerTextColor: "#ffffff",
+        headerSecondaryColor: "rgba(255,255,255,0.82)",
+        headerAlign: "left",
+        singleColumn: false,
+        gridTemplateColumns: "1fr 250px",
+        sidebarFirst: false,
+        sidebarBackground: "#f8fafc",
+        sidebarBorder: `1px solid ${color}1f`,
+        sectionMode: "boxed",
+        cardSections: true,
+        skillMode: "chips",
+        bodyPaddingMain: "22px 24px 22px 32px",
+        bodyPaddingSide: "22px 18px",
+        photoBorder: "3px solid rgba(255,255,255,0.25)",
+        photoShape: "soft-square",
+        contactChipMode: "glass",
+      };
+      break;
+    case "soft":
+      baseTheme = {
+        fontFamily: "'Trebuchet MS', 'Segoe UI', sans-serif",
+        documentBackground: "#ffffff",
+        shellBorder: `1px solid ${color}20`,
+        shellShadow: "0 18px 44px rgba(15,23,42,0.06)",
+        shellRadius: 24,
+        headerBackground: `linear-gradient(135deg, ${color}22, #ffffff 72%)`,
+        headerTextColor: "#0f172a",
+        headerSecondaryColor: "#475569",
+        headerAlign: "left",
+        singleColumn: false,
+        gridTemplateColumns: "1fr 250px",
+        sidebarFirst: false,
+        sidebarBackground: `${color}10`,
+        sidebarBorder: `1px solid ${color}22`,
+        sectionMode: "pill",
+        cardSections: true,
+        skillMode: "chips",
+        bodyPaddingMain: "22px 24px 22px 32px",
+        bodyPaddingSide: "22px 18px",
+        photoBorder: `3px solid ${color}33`,
+        photoShape: "rounded",
+        contactChipMode: "soft",
+      };
+      break;
+    case "sidebar":
+      baseTheme = {
+        fontFamily: "'Segoe UI', Arial, sans-serif",
+        documentBackground: "#ffffff",
+        shellBorder: `1px solid ${color}1a`,
+        shellShadow: "0 18px 44px rgba(15,23,42,0.08)",
+        shellRadius: 18,
+        headerBackground: "linear-gradient(135deg, #0f172a, #1f2937)",
+        headerTextColor: "#ffffff",
+        headerSecondaryColor: "rgba(255,255,255,0.82)",
+        headerAlign: "left",
+        singleColumn: false,
+        gridTemplateColumns: "250px 1fr",
+        sidebarFirst: true,
+        sidebarBackground: `linear-gradient(180deg, ${color}18, ${color}08)`,
+        sidebarBorder: `1px solid ${color}22`,
+        sectionMode: "line",
+        cardSections: false,
+        skillMode: "bars",
+        bodyPaddingMain: "22px 28px",
+        bodyPaddingSide: "22px 18px",
+        photoBorder: "3px solid rgba(255,255,255,0.3)",
+        photoShape: "square",
+        contactChipMode: "glass",
+      };
+      break;
+    case "serif":
+      baseTheme = {
+        fontFamily: "Georgia, 'Times New Roman', serif",
+        documentBackground: "#fffdf7",
+        shellBorder: `1px solid ${color}1f`,
+        shellShadow: "0 18px 42px rgba(15,23,42,0.06)",
+        shellRadius: 8,
+        headerBackground: "#f6efe4",
+        headerTextColor: "#111827",
+        headerSecondaryColor: "#6b7280",
+        headerAlign: "center",
+        singleColumn: true,
+        gridTemplateColumns: "1fr",
+        sidebarFirst: false,
+        sidebarBackground: "#ffffff",
+        sidebarBorder: `1px solid ${color}22`,
+        sectionMode: "boxed",
+        cardSections: true,
+        skillMode: "chips",
+        bodyPaddingMain: "24px 34px 28px",
+        bodyPaddingSide: "0",
+        photoBorder: `3px solid ${color}2d`,
+        photoShape: "rounded",
+        contactChipMode: "outline",
+      };
+      break;
+    case "minimal":
+      baseTheme = {
+        fontFamily: "'Arial', sans-serif",
+        documentBackground: "#ffffff",
+        shellBorder: `1px solid ${color}16`,
+        shellShadow: "0 16px 38px rgba(15,23,42,0.06)",
+        shellRadius: 10,
+        headerBackground: `linear-gradient(180deg, #ffffff 0%, #ffffff 72%, ${color}12 100%)`,
+        headerTextColor: "#0f172a",
+        headerSecondaryColor: "#475569",
+        headerAlign: "center",
+        singleColumn: true,
+        gridTemplateColumns: "1fr",
+        sidebarFirst: false,
+        sidebarBackground: "#ffffff",
+        sidebarBorder: `1px solid ${color}18`,
+        sectionMode: "pill",
+        cardSections: false,
+        skillMode: "chips",
+        bodyPaddingMain: "24px 34px 28px",
+        bodyPaddingSide: "0",
+        photoBorder: `3px solid ${color}22`,
+        photoShape: "soft-square",
+        contactChipMode: "outline",
+      };
+      break;
+    case "classic":
+    default:
+      baseTheme = {
+        fontFamily: "'Segoe UI', Arial, sans-serif",
+        documentBackground: "#ffffff",
+        shellBorder: `1px solid ${color}16`,
+        shellShadow: "0 18px 44px rgba(15,23,42,0.07)",
+        shellRadius: 18,
+        headerBackground: `linear-gradient(135deg, ${color}, ${color}cc)`,
+        headerTextColor: "#ffffff",
+        headerSecondaryColor: "rgba(255,255,255,0.86)",
+        headerAlign: "left",
+        singleColumn: false,
+        gridTemplateColumns: "1fr 250px",
+        sidebarFirst: false,
+        sidebarBackground: "#f7f8fa",
+        sidebarBorder: `1px solid ${color}14`,
+        sectionMode: "line",
+        cardSections: false,
+        skillMode: "bars",
+        bodyPaddingMain: "22px 24px 22px 32px",
+        bodyPaddingSide: "22px 18px",
+        photoBorder: "3px solid rgba(255,255,255,0.34)",
+        photoShape: "circle",
+        contactChipMode: "glass",
+      };
+      break;
+  }
+
+  return {
+    ...baseTheme,
+    ...(DESIGN_THEME_OVERRIDES[design?.key] || {}),
+  };
+}
+
+function getPhotoRadius(shape) {
+  switch (shape) {
+    case "square":
+      return 18;
+    case "soft-square":
+      return 24;
+    case "rounded":
+      return 28;
+    case "circle":
+    default:
+      return "50%";
+  }
+}
+
 // ─── EDITABLE FIELD ───────────────────────────────────────────────────────────
 function EF({ value, onChange, multiline, style, placeholder }) {
   const [active, setActive] = useState(false);
@@ -307,8 +732,59 @@ function EditableTextMulti({ value, onChange, style, placeholder, editMode }) {
     : <span style={style}>{value}</span>;
 }
 
+function SectionTitle({ title, color, mode, compact }) {
+  if (mode === "pill") {
+    return (
+      <div style={{ marginBottom: compact ? 10 : 12 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", background: `${color}14`, color, borderRadius: 999, padding: compact ? "4px 10px" : "5px 12px", fontSize: compact ? 10.5 : 11.5, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase" }}>
+          {title}
+        </span>
+      </div>
+    );
+  }
+
+  if (mode === "boxed") {
+    return (
+      <div style={{ marginBottom: compact ? 10 : 12 }}>
+        <span style={{ display: "inline-block", border: `1.5px solid ${color}`, color, padding: compact ? "4px 8px" : "5px 10px", borderRadius: 6, fontSize: compact ? 10.5 : 11.5, fontWeight: 800, letterSpacing: 0.7, textTransform: "uppercase", background: "#fff" }}>
+          {title}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: compact ? 10 : 12 }}>
+      <h3 style={{ margin: 0, fontSize: compact ? 10.8 : 12, fontWeight: 800, color, textTransform: "uppercase", letterSpacing: compact ? 1 : 1.2, borderBottom: `2px solid ${color}`, paddingBottom: 5 }}>
+        {title}
+      </h3>
+    </div>
+  );
+}
+
+function DocumentSection({ title, color, theme, compact, children }) {
+  const content = theme.cardSections
+    ? (
+      <div style={{ background: "#fff", border: `1px solid ${color}18`, borderRadius: 14, padding: compact ? "12px" : "14px 15px", boxShadow: "0 6px 16px rgba(15,23,42,0.04)" }}>
+        {children}
+      </div>
+    )
+    : children;
+
+  return (
+    <div style={{ marginBottom: compact ? 16 : 20 }}>
+      <SectionTitle title={title} color={color} mode={theme.sectionMode} compact={compact} />
+      {content}
+    </div>
+  );
+}
+
 // ─── CV DOCUMENT ──────────────────────────────────────────────────────────────
-function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode, lang }) {
+function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMode, lang }) {
+  const color = design?.color || "#1a56db";
+  const theme = getDesignTheme(design);
+  const darkHeader = theme.headerTextColor === "#ffffff";
+  const photoRadius = getPhotoRadius(theme.photoShape);
   const set = (k, v) => setCvData(p => ({ ...p, [k]: v }));
   const setN = (arr, i, f, v) => setCvData(p => { const a = JSON.parse(JSON.stringify(p[arr])); a[i][f] = v; return { ...p, [arr]: a }; });
   const setL = (arr, i, v) => setCvData(p => { const a = [...p[arr]]; a[i] = v; return { ...p, [arr]: a }; });
@@ -316,199 +792,281 @@ function CVDocument({ cvData, setCvData, color, photoUrl, onPhotoClick, editMode
     ? { profil: "Professional Profile", exp: "Professional Experience", edu: "Education", comp: "Skills", limbi: "Languages", cert: "Certifications" }
     : { profil: "Profil Profesional", exp: "Experiență Profesională", edu: "Educație", comp: "Competențe", limbi: "Limbi Străine", cert: "Certificări" };
 
+  const contactEntries = [
+    { key: "email", icon: "📧", value: cvData.email },
+    { key: "telefon", icon: "📞", value: cvData.telefon },
+    { key: "oras", icon: "📍", value: cvData.oras },
+    { key: "linkedin", icon: "🔗", value: cvData.linkedin },
+  ];
+
+  const contactChipStyle = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "5px 10px",
+    borderRadius: 999,
+    border: theme.contactChipMode === "outline" ? `1px solid ${darkHeader ? "rgba(255,255,255,0.22)" : `${color}35`}` : "1px solid transparent",
+    background:
+      theme.contactChipMode === "outline"
+        ? darkHeader ? "transparent" : "#ffffff"
+        : darkHeader
+          ? "rgba(255,255,255,0.14)"
+          : theme.contactChipMode === "soft"
+            ? `${color}10`
+            : `${color}14`,
+    color: darkHeader ? theme.headerSecondaryColor : "#334155",
+    fontSize: 11.5,
+    boxShadow: theme.contactChipMode === "soft" ? `0 6px 14px ${color}12` : "none",
+  };
+
+  const itemSurfaceStyle = theme.cardSections
+    ? { background: "#fff", border: `1px solid ${color}14`, borderRadius: 12, padding: "10px 12px", boxShadow: "0 4px 12px rgba(15,23,42,0.03)" }
+    : null;
+
+  const renderSkills = (compact = false) => (
+    <DocumentSection title={labels.comp} color={color} theme={theme} compact={compact}>
+      {cvData.competente.map((skill, index) => {
+        const skillWidth = getSkillWidth(skill);
+
+        if (theme.skillMode === "chips") {
+          return (
+            <div key={index} style={{ display: "inline-flex", flexDirection: "column", marginRight: 8, marginBottom: 8, verticalAlign: "top" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", background: `${color}12`, color, borderRadius: 999, padding: "5px 10px", fontSize: 11.5, fontWeight: 600 }}>
+                {editMode ? <EF value={skill} onChange={value => setL("competente", index, value)} style={{ fontSize: 11.5, color }} /> : skill}
+              </span>
+              {editMode && (
+                <button
+                  onClick={() => setCvData(p => ({ ...p, competente: p.competente.filter((_, skillIndex) => skillIndex !== index) }))}
+                  style={{ marginTop: 4, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer", alignSelf: "flex-start" }}
+                >
+                  Șterge
+                </button>
+              )}
+            </div>
+          );
+        }
+
+        return (
+          <div key={index} style={{ marginBottom: 9 }}>
+            {editMode ? <EF value={skill} onChange={value => setL("competente", index, value)} style={{ fontSize: 12, fontWeight: 500, color: "#334155" }} /> : <span style={{ fontSize: 12, fontWeight: 500, color: "#334155" }}>{skill}</span>}
+            {editMode && (
+              <button
+                onClick={() => setCvData(p => ({ ...p, competente: p.competente.filter((_, skillIndex) => skillIndex !== index) }))}
+                style={{ marginTop: 4, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer" }}
+              >
+                Șterge
+              </button>
+            )}
+            <div style={{ height: 3.5, background: "#e2e8f0", borderRadius: 999, marginTop: 3 }}>
+              <div style={{ height: "100%", width: `${skillWidth}%`, background: color, borderRadius: 999 }} />
+            </div>
+          </div>
+        );
+      })}
+      {editMode && (
+        <button
+          onClick={() => setCvData(p => ({ ...p, competente: [...p.competente, ""] }))}
+          style={{ marginTop: 4, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11, padding: "5px 7px", borderRadius: 7, cursor: "pointer" }}
+        >
+          + Adaugă competență
+        </button>
+      )}
+    </DocumentSection>
+  );
+
+  const renderLanguages = (compact = false) => (
+    <DocumentSection title={labels.limbi} color={color} theme={theme} compact={compact}>
+      {cvData.limbi.map((language, index) => (
+        <div key={index} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0, display: "inline-block" }} />
+          {editMode ? <EF value={language} onChange={value => setL("limbi", index, value)} style={{ fontSize: 12.5, color: "#555" }} /> : <span style={{ fontSize: 12.5, color: "#555" }}>{language}</span>}
+          {editMode && (
+            <button
+              onClick={() => setCvData(p => ({ ...p, limbi: p.limbi.filter((_, languageIndex) => languageIndex !== index) }))}
+              style={{ border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer" }}
+            >
+              Șterge
+            </button>
+          )}
+        </div>
+      ))}
+      {editMode && (
+        <button
+          onClick={() => setCvData(p => ({ ...p, limbi: [...p.limbi, ""] }))}
+          style={{ marginTop: 4, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11, padding: "5px 7px", borderRadius: 7, cursor: "pointer" }}
+        >
+          + Adaugă limbă
+        </button>
+      )}
+    </DocumentSection>
+  );
+
+  const renderCertifications = (compact = false) => (
+    <DocumentSection title={labels.cert} color={color} theme={theme} compact={compact}>
+      {cvData.certificari.map((certificate, index) => (
+        <div key={index} style={{ marginBottom: 7, padding: "6px 9px", background: theme.cardSections ? `${color}08` : "#fff", borderRadius: 7, borderLeft: `3px solid ${color}` }}>
+          {editMode ? <EF value={certificate} onChange={value => setL("certificari", index, value)} style={{ fontSize: 11.5, color: "#555" }} /> : <span style={{ fontSize: 11.5, color: "#555" }}>{certificate}</span>}
+          {editMode && (
+            <button
+              onClick={() => setCvData(p => ({ ...p, certificari: p.certificari.filter((_, certificateIndex) => certificateIndex !== index) }))}
+              style={{ marginTop: 4, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer" }}
+            >
+              Șterge
+            </button>
+          )}
+        </div>
+      ))}
+      {editMode && (
+        <button
+          onClick={() => setCvData(p => ({ ...p, certificari: [...p.certificari, ""] }))}
+          style={{ marginTop: 4, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11, padding: "5px 7px", borderRadius: 7, cursor: "pointer" }}
+        >
+          + Adaugă certificare
+        </button>
+      )}
+    </DocumentSection>
+  );
+
+  const sideContent = (
+    <>
+      {renderSkills(!theme.singleColumn)}
+      {renderLanguages(!theme.singleColumn)}
+      {renderCertifications(!theme.singleColumn)}
+    </>
+  );
+
+  const mainContent = (
+    <>
+      <DocumentSection title={labels.profil} color={color} theme={theme}>
+        <EditableTextMulti value={cvData.despre} onChange={value => set("despre", value)} editMode={editMode} style={{ fontSize: 13, lineHeight: 1.7, color: "#444", display: "block", width: "100%" }} placeholder="Profil profesional..." />
+      </DocumentSection>
+
+      <DocumentSection title={labels.exp} color={color} theme={theme}>
+        {cvData.experienta.map((exp, index) => (
+          <div key={index} style={{ marginBottom: 16, ...(itemSurfaceStyle || {}) }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <EditableText value={exp.rol} onChange={value => setN("experienta", index, "rol", value)} editMode={editMode} style={{ display: "block", fontWeight: 700, fontSize: 13.5, color: "#111" }} />
+                <EditableText value={exp.firma} onChange={value => setN("experienta", index, "firma", value)} editMode={editMode} style={{ display: "block", color, fontWeight: 600, fontSize: 12.5 }} />
+              </div>
+              <div style={{ background: color, color: "#fff", padding: "2px 9px", borderRadius: 20, fontSize: 11, whiteSpace: "nowrap", flexShrink: 0 }}>
+                <EditableText value={exp.perioada} onChange={value => setN("experienta", index, "perioada", value)} editMode={editMode} style={{ color: "#fff" }} />
+              </div>
+            </div>
+            {editMode
+              ? <EF value={exp.desc} onChange={value => setN("experienta", index, "desc", value)} multiline style={{ fontSize: 12.5, color: "#555", marginTop: 6 }} placeholder="Realizări separate cu •" />
+              : <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{exp.desc.split(" • ").filter(Boolean).map((item, bulletIndex) => <li key={bulletIndex} style={{ fontSize: 12.5, lineHeight: 1.6, color: "#555", marginBottom: 2 }}>{item}</li>)}</ul>}
+            {editMode && (
+              <button
+                onClick={() => setCvData(p => ({ ...p, experienta: p.experienta.filter((_, experienceIndex) => experienceIndex !== index) }))}
+                style={{ marginTop: 6, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 11, padding: "2px 6px", borderRadius: 6, cursor: "pointer" }}
+              >
+                Șterge experiența
+              </button>
+            )}
+          </div>
+        ))}
+        {editMode && (
+          <button
+            onClick={() => setCvData(p => ({ ...p, experienta: [...p.experienta, { firma: "", perioada: "", rol: "", desc: "" }] }))}
+            style={{ marginTop: 6, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11.5, padding: "6px 8px", borderRadius: 7, cursor: "pointer" }}
+          >
+            + Adaugă experiență
+          </button>
+        )}
+      </DocumentSection>
+
+      <DocumentSection title={labels.edu} color={color} theme={theme}>
+        {cvData.educatie.map((edu, index) => (
+          <div key={index} style={{ marginBottom: 10, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", ...(itemSurfaceStyle || {}) }}>
+            <div style={{ flex: 1 }}>
+              <EditableText value={edu.diploma} onChange={value => setN("educatie", index, "diploma", value)} editMode={editMode} style={{ display: "block", fontWeight: 700, fontSize: 13 }} placeholder="Diplomă / Curs" />
+              <EditableText value={edu.institutie} onChange={value => setN("educatie", index, "institutie", value)} editMode={editMode} style={{ display: "block", color, fontSize: 12.5 }} placeholder="Instituție" />
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <EditableText value={edu.perioada} onChange={value => setN("educatie", index, "perioada", value)} editMode={editMode} style={{ fontSize: 11.5, color: "#888", whiteSpace: "nowrap" }} placeholder="Perioadă" />
+              {editMode && (
+                <button
+                  onClick={() => setCvData(p => ({ ...p, educatie: p.educatie.filter((_, educationIndex) => educationIndex !== index) }))}
+                  style={{ border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 11, padding: "2px 6px", borderRadius: 6, cursor: "pointer" }}
+                >
+                  Șterge
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {editMode && (
+          <button
+            onClick={() => setCvData(p => ({ ...p, educatie: [...p.educatie, { institutie: "", perioada: "", diploma: "" }] }))}
+            style={{ marginTop: 6, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11.5, padding: "6px 8px", borderRadius: 7, cursor: "pointer" }}
+          >
+            + Adaugă educație
+          </button>
+        )}
+      </DocumentSection>
+
+      {theme.singleColumn && sideContent}
+    </>
+  );
+
   return (
-    <div id="cv-document" className="cv-document" style={{ fontFamily: "'Segoe UI', Arial, sans-serif", width: "100%", maxWidth: 794, background: "#fff", color: "#1a1a1a" }}>
-      <div style={{ background: color, padding: "30px 42px 22px", display: "flex", alignItems: "center", gap: 24 }}>
+    <div id="cv-document" className="cv-document" style={{ fontFamily: theme.fontFamily, width: "100%", maxWidth: 794, background: theme.documentBackground, color: "#1a1a1a", border: theme.shellBorder, borderRadius: theme.shellRadius, overflow: "hidden", boxShadow: theme.shellShadow }}>
+      <div style={{ background: theme.headerBackground, padding: theme.headerAlign === "center" ? "32px 42px 24px" : "30px 42px 24px", display: "flex", flexDirection: theme.headerAlign === "center" ? "column" : "row", alignItems: "center", justifyContent: theme.headerAlign === "center" ? "center" : "flex-start", gap: 20, textAlign: theme.headerAlign === "center" ? "center" : "left", borderTop: !darkHeader ? `6px solid ${color}` : "none", position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", inset: 0, opacity: darkHeader ? 0.16 : 0.45, background: design?.variant === "minimal" || design?.variant === "serif" ? "repeating-linear-gradient(90deg, transparent 0px, transparent 34px, rgba(255,255,255,0.5) 34px, rgba(255,255,255,0.5) 35px)" : "radial-gradient(circle at top right, rgba(255,255,255,0.7) 0%, transparent 42%), linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.14) 48%, transparent 85%)", pointerEvents: "none" }} />
         <div onClick={onPhotoClick} style={{ flexShrink: 0, cursor: "pointer" }}>
           {photoUrl
-            ? <Image src={photoUrl} alt="foto" width={96} height={96} unoptimized style={{ width: 96, height: 96, borderRadius: "50%", objectFit: "cover", border: "3px solid rgba(255,255,255,0.4)" }} />
-            : <div style={{ width: 96, height: 96, borderRadius: "50%", background: "rgba(255,255,255,0.15)", border: "3px dashed rgba(255,255,255,0.5)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            ? <Image src={photoUrl} alt="foto" width={96} height={96} unoptimized style={{ width: 96, height: 96, borderRadius: photoRadius, objectFit: "cover", border: theme.photoBorder, boxShadow: "0 8px 18px rgba(15,23,42,0.08)", position: "relative", zIndex: 1 }} />
+            : <div style={{ width: 96, height: 96, borderRadius: photoRadius, background: darkHeader ? "rgba(255,255,255,0.14)" : `${color}12`, border: darkHeader ? "3px dashed rgba(255,255,255,0.4)" : `3px dashed ${color}35`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative", zIndex: 1 }}>
                 <span style={{ fontSize: 24 }}>📷</span>
-                <span style={{ fontSize: 9, color: "rgba(255,255,255,0.8)", marginTop: 3 }}>Photo</span>
+                <span style={{ fontSize: 9, color: darkHeader ? "rgba(255,255,255,0.8)" : "#64748b", marginTop: 3 }}>Photo</span>
               </div>}
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <EditableText value={cvData.nume} onChange={v => set("nume", v)} editMode={editMode} style={{ display: "block", color: "#fff", fontSize: 25, fontWeight: 700, letterSpacing: "-0.3px" }} />
-          <EditableText value={cvData.titlu} onChange={v => set("titlu", v)} editMode={editMode} style={{ display: "block", color: "rgba(255,255,255,0.88)", fontSize: 13.5, fontWeight: 500, marginTop: 4 }} />
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 10, fontSize: 11.5, color: "rgba(255,255,255,0.88)" }}>
-            {(editMode || cvData.email) && (
-              <span>📧 <EditableText value={cvData.email} onChange={v => set("email", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
-            )}
-            {(editMode || cvData.telefon) && (
-              <span>📞 <EditableText value={cvData.telefon} onChange={v => set("telefon", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
-            )}
-            {(editMode || cvData.oras) && (
-              <span>📍 <EditableText value={cvData.oras} onChange={v => set("oras", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
-            )}
-            {(editMode || cvData.linkedin) && (
-              <span>🔗 <EditableText value={cvData.linkedin} onChange={v => set("linkedin", v)} editMode={editMode} style={{ color: "rgba(255,255,255,0.88)" }} /></span>
-            )}
+        <div style={{ flex: 1, minWidth: 0, position: "relative", zIndex: 1 }}>
+          <EditableText value={cvData.nume} onChange={value => set("nume", value)} editMode={editMode} style={{ display: "block", color: theme.headerTextColor, fontSize: 25, fontWeight: 700, letterSpacing: "-0.3px" }} />
+          <EditableText value={cvData.titlu} onChange={value => set("titlu", value)} editMode={editMode} style={{ display: "block", color: theme.headerSecondaryColor, fontSize: 13.5, fontWeight: 500, marginTop: 4 }} />
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: theme.headerAlign === "center" ? "center" : "flex-start", marginTop: 12 }}>
+            {contactEntries.map((entry) => (
+              (editMode || entry.value) ? (
+                <span key={entry.key} style={contactChipStyle}>
+                  <span>{entry.icon}</span>
+                  <EditableText value={entry.value} onChange={value => set(entry.key, value)} editMode={editMode} style={{ color: "inherit" }} />
+                </span>
+              ) : null
+            ))}
           </div>
         </div>
       </div>
-      <div className="cv-document-grid" style={{ display: "grid", gridTemplateColumns: "1fr 258px" }}>
-        <div style={{ padding: "22px 26px 22px 42px" }}>
-          <Sec title={labels.profil} color={color}>
-            <EditableTextMulti value={cvData.despre} onChange={v => set("despre", v)} editMode={editMode} style={{ fontSize: 13, lineHeight: 1.7, color: "#444", display: "block", width: "100%" }} placeholder="Profil profesional..." />
-          </Sec>
-          <Sec title={labels.exp} color={color}>
-            {cvData.experienta.map((exp, i) => (
-              <div key={i} style={{ marginBottom: 16 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <EditableText value={exp.rol} onChange={v => setN("experienta", i, "rol", v)} editMode={editMode} style={{ display: "block", fontWeight: 700, fontSize: 13.5, color: "#111" }} />
-                    <EditableText value={exp.firma} onChange={v => setN("experienta", i, "firma", v)} editMode={editMode} style={{ display: "block", color, fontWeight: 600, fontSize: 12.5 }} />
-                  </div>
-                  <div style={{ background: color, color: "#fff", padding: "2px 9px", borderRadius: 20, fontSize: 11, whiteSpace: "nowrap", flexShrink: 0, alignSelf: "flex-start" }}>
-                    <EditableText value={exp.perioada} onChange={v => setN("experienta", i, "perioada", v)} editMode={editMode} style={{ color: "#fff" }} />
-                  </div>
-                </div>
-                {editMode
-                  ? <EF value={exp.desc} onChange={v => setN("experienta", i, "desc", v)} multiline style={{ fontSize: 12.5, color: "#555", marginTop: 6 }} placeholder="Realizări separate cu •" />
-                  : <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{exp.desc.split(" • ").map((it, j) => <li key={j} style={{ fontSize: 12.5, lineHeight: 1.6, color: "#555", marginBottom: 2 }}>{it}</li>)}</ul>}
-                {editMode && (
-                  <button
-                    onClick={() => setCvData(p => ({ ...p, experienta: p.experienta.filter((_, idx) => idx !== i) }))}
-                    style={{ marginTop: 6, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 11, padding: "2px 6px", borderRadius: 6, cursor: "pointer" }}
-                  >
-                    Șterge experiența
-                  </button>
-                )}
-              </div>
-            ))}
-            {editMode && (
-              <button
-                onClick={() => setCvData(p => ({ ...p, experienta: [...p.experienta, { firma: "", perioada: "", rol: "", desc: "" }] }))}
-                style={{ marginTop: 6, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11.5, padding: "6px 8px", borderRadius: 7, cursor: "pointer" }}
-              >
-                + Adaugă experiență
-              </button>
-            )}
-          </Sec>
-          <Sec title={labels.edu} color={color}>
-            {cvData.educatie.map((edu, i) => (
-              <div key={i} style={{ marginBottom: 10, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
-                <div style={{ flex: 1 }}>
-                  <EditableText value={edu.diploma} onChange={v => setN("educatie", i, "diploma", v)} editMode={editMode} style={{ display: "block", fontWeight: 700, fontSize: 13 }} placeholder="Diplomă / Curs" />
-                  <EditableText value={edu.institutie} onChange={v => setN("educatie", i, "institutie", v)} editMode={editMode} style={{ display: "block", color, fontSize: 12.5 }} placeholder="Instituție" />
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <EditableText value={edu.perioada} onChange={v => setN("educatie", i, "perioada", v)} editMode={editMode} style={{ fontSize: 11.5, color: "#888", whiteSpace: "nowrap" }} placeholder="Perioadă" />
-                  {editMode && (
-                    <button
-                      onClick={() => setCvData(p => ({ ...p, educatie: p.educatie.filter((_, idx) => idx !== i) }))}
-                      style={{ border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 11, padding: "2px 6px", borderRadius: 6, cursor: "pointer" }}
-                    >
-                      Șterge
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-            {editMode && (
-              <button
-                onClick={() => setCvData(p => ({ ...p, educatie: [...p.educatie, { institutie: "", perioada: "", diploma: "" }] }))}
-                style={{ marginTop: 6, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11.5, padding: "6px 8px", borderRadius: 7, cursor: "pointer" }}
-              >
-                + Adaugă educație
-              </button>
-            )}
-          </Sec>
+
+      {theme.singleColumn ? (
+        <div style={{ padding: theme.bodyPaddingMain }}>
+          {mainContent}
         </div>
-        <div style={{ background: "#f7f8fa", padding: "22px 18px", borderLeft: "1px solid #eee" }}>
-          <SideSec title={labels.comp} color={color}>
-            {cvData.competente.map((c, i) => {
-              const skillWidth = getSkillWidth(c);
-              return (
-                <div key={i} style={{ marginBottom: 9 }}>
-                  {editMode ? <EF value={c} onChange={v => setL("competente", i, v)} style={{ fontSize: 12, fontWeight: 500, color: "#444" }} /> : <span style={{ fontSize: 12, fontWeight: 500, color: "#444" }}>{c}</span>}
-                  {editMode && (
-                    <button
-                      onClick={() => setCvData(p => ({ ...p, competente: p.competente.filter((_, idx) => idx !== i) }))}
-                      style={{ marginTop: 4, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer" }}
-                    >
-                      Șterge
-                    </button>
-                  )}
-                  <div style={{ height: 3.5, background: "#e2e8f0", borderRadius: 2, marginTop: 3 }}>
-                    <div style={{ height: "100%", width: `${skillWidth}%`, background: color, borderRadius: 2 }} />
-                  </div>
-                </div>
-              );
-            })}
-            {editMode && (
-              <button
-                onClick={() => setCvData(p => ({ ...p, competente: [...p.competente, ""] }))}
-                style={{ marginTop: 4, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11, padding: "5px 7px", borderRadius: 7, cursor: "pointer" }}
-              >
-                + Adaugă competență
-              </button>
-            )}
-          </SideSec>
-          <SideSec title={labels.limbi} color={color}>
-            {cvData.limbi.map((l, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
-                <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0, display: "inline-block" }} />
-                {editMode ? <EF value={l} onChange={v => setL("limbi", i, v)} style={{ fontSize: 12.5, color: "#555" }} /> : <span style={{ fontSize: 12.5, color: "#555" }}>{l}</span>}
-                {editMode && (
-                  <button
-                    onClick={() => setCvData(p => ({ ...p, limbi: p.limbi.filter((_, idx) => idx !== i) }))}
-                    style={{ border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer" }}
-                  >
-                    Șterge
-                  </button>
-                )}
-              </div>
-            ))}
-            {editMode && (
-              <button
-                onClick={() => setCvData(p => ({ ...p, limbi: [...p.limbi, ""] }))}
-                style={{ marginTop: 4, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11, padding: "5px 7px", borderRadius: 7, cursor: "pointer" }}
-              >
-                + Adaugă limbă
-              </button>
-            )}
-          </SideSec>
-          <SideSec title={labels.cert} color={color}>
-            {cvData.certificari.map((c, i) => (
-              <div key={i} style={{ marginBottom: 7, padding: "5px 9px", background: "#fff", borderRadius: 5, borderLeft: `3px solid ${color}` }}>
-                {editMode ? <EF value={c} onChange={v => setL("certificari", i, v)} style={{ fontSize: 11.5, color: "#555" }} /> : <span style={{ fontSize: 11.5, color: "#555" }}>{c}</span>}
-                {editMode && (
-                  <button
-                    onClick={() => setCvData(p => ({ ...p, certificari: p.certificari.filter((_, idx) => idx !== i) }))}
-                    style={{ marginTop: 4, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer" }}
-                  >
-                    Șterge
-                  </button>
-                )}
-              </div>
-            ))}
-            {editMode && (
-              <button
-                onClick={() => setCvData(p => ({ ...p, certificari: [...p.certificari, ""] }))}
-                style={{ marginTop: 4, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11, padding: "5px 7px", borderRadius: 7, cursor: "pointer" }}
-              >
-                + Adaugă certificare
-              </button>
-            )}
-          </SideSec>
+      ) : (
+        <div className="cv-document-grid" style={{ display: "grid", gridTemplateColumns: theme.gridTemplateColumns }}>
+          {theme.sidebarFirst && (
+            <div style={{ background: theme.sidebarBackground, padding: theme.bodyPaddingSide, borderRight: theme.sidebarBorder }}>
+              {sideContent}
+            </div>
+          )}
+          <div style={{ padding: theme.bodyPaddingMain }}>
+            {mainContent}
+          </div>
+          {!theme.sidebarFirst && (
+            <div style={{ background: theme.sidebarBackground, padding: theme.bodyPaddingSide, borderLeft: theme.sidebarBorder }}>
+              {sideContent}
+            </div>
+          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
-function Sec({ title, color, children }) {
-  return <div style={{ marginBottom: 18 }}><h3 style={{ margin: "0 0 9px", fontSize: 12, fontWeight: 800, color, textTransform: "uppercase", letterSpacing: 1.3, borderBottom: `2px solid ${color}`, paddingBottom: 5 }}>{title}</h3>{children}</div>;
-}
-function SideSec({ title, color, children }) {
-  return <div style={{ marginBottom: 18 }}><h3 style={{ margin: "0 0 9px", fontSize: 11, fontWeight: 800, color, textTransform: "uppercase", letterSpacing: 1, borderBottom: `2px solid ${color}`, paddingBottom: 4 }}>{title}</h3>{children}</div>;
-}
-
-// ─── TEMPLATE CARD ────────────────────────────────────────────────────────────
-function TemplateCard({ template, onSelect }) {
+function RoleCard({ profile, onSelect }) {
   const [hov, setHov] = useState(false);
-  const { data, color, icon, job } = template;
+  const { data, color, icon, job } = profile;
+
   return (
     <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
       style={{ background: "#fff", borderRadius: 15, overflow: "hidden", border: `1.5px solid ${hov ? color : "#e8ecf4"}`, boxShadow: hov ? `0 10px 28px ${color}22` : "0 2px 8px rgba(0,0,0,0.05)", transition: "all 0.22s", cursor: "pointer" }}>
@@ -520,20 +1078,101 @@ function TemplateCard({ template, onSelect }) {
             <div style={{ color: "rgba(255,255,255,0.78)", fontSize: 11 }}>{job}</div>
           </div>
         </div>
-        <div style={{ marginTop: 11, display: "flex", flexDirection: "column", gap: 4 }}>
-          {["78%","55%","88%","65%"].map((w,i) => <div key={i} style={{ height: 3, width: w, background: "rgba(255,255,255,0.28)", borderRadius: 2 }} />)}
-        </div>
-        <div style={{ position: "absolute", top: 10, right: 10, background: "rgba(255,255,255,0.2)", borderRadius: 6, padding: "2px 7px", fontSize: 10, color: "#fff", fontWeight: 700 }}>ATS ✓</div>
+        <div style={{ position: "absolute", top: 10, right: 10, background: "rgba(255,255,255,0.2)", borderRadius: 6, padding: "2px 7px", fontSize: 10, color: "#fff", fontWeight: 700 }}>Starter</div>
       </div>
       <div style={{ padding: "13px 17px 17px" }}>
         <h3 style={{ margin: "0 0 5px", fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{data.titlu}</h3>
-        <p style={{ margin: "0 0 10px", fontSize: 11.5, color: "#64748b", lineHeight: 1.5 }}>{data.despre.slice(0, 82)}...</p>
+        <p style={{ margin: "0 0 10px", fontSize: 11.5, color: "#64748b", lineHeight: 1.5 }}>{data.despre.slice(0, 96)}...</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 12 }}>
-          {data.competente.slice(0, 3).map((c,i) => <span key={i} style={{ padding: "2px 7px", background: `${color}14`, color, borderRadius: 20, fontSize: 10.5, fontWeight: 600 }}>{c.split(" ")[0]}</span>)}
-          <span style={{ padding: "2px 7px", background: "#f1f5f9", color: "#64748b", borderRadius: 20, fontSize: 10.5 }}>+{data.competente.length - 3}</span>
+          {data.competente.slice(0, 3).map((competence, index) => <span key={index} style={{ padding: "2px 7px", background: `${color}14`, color, borderRadius: 20, fontSize: 10.5, fontWeight: 600 }}>{competence.split(" ")[0]}</span>)}
         </div>
-        <button onClick={() => onSelect(template)} style={{ width: "100%", padding: "9px", borderRadius: 9, background: hov ? color : "#f8fafc", color: hov ? "#fff" : "#374151", border: `1.5px solid ${hov ? color : "#e2e8f0"}`, cursor: "pointer", fontWeight: 700, fontSize: 12.5, transition: "all 0.18s" }}>
-          {hov ? "✦ Folosește template-ul" : "Previzualizează →"}
+        <button onClick={() => onSelect(profile)} style={{ width: "100%", padding: "9px", borderRadius: 9, background: hov ? color : "#f8fafc", color: hov ? "#fff" : "#374151", border: `1.5px solid ${hov ? color : "#e2e8f0"}`, cursor: "pointer", fontWeight: 700, fontSize: 12.5, transition: "all 0.18s" }}>
+          {hov ? "Folosește rolul" : "Alege rolul →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CustomRoleCard({ roleName, onSelect }) {
+  return (
+    <button onClick={() => onSelect(roleName)} style={{ width: "100%", textAlign: "left", background: "linear-gradient(135deg,#0f172a,#1e293b)", borderRadius: 16, border: "1.5px solid #0f172a", padding: 20, cursor: "pointer", color: "#fff", boxShadow: "0 18px 40px rgba(15,23,42,0.18)" }}>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.12)", borderRadius: 999, padding: "4px 10px", fontSize: 11, fontWeight: 700, marginBottom: 14 }}>
+        <span>Custom role</span>
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.4px", marginBottom: 8 }}>
+        Creează CV pentru &quot;{roleName}&quot;
+      </div>
+      <p style={{ margin: "0 0 16px", fontSize: 13, color: "rgba(255,255,255,0.78)", lineHeight: 1.6 }}>
+        Păstrăm cele 18 designuri și îți deschidem un CV curat, gata de completat pentru jobul tău.
+      </p>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700 }}>
+        <span>Continuă către designuri</span>
+        <span>→</span>
+      </div>
+    </button>
+  );
+}
+
+function DesignCard({ design, onSelect }) {
+  const [hov, setHov] = useState(false);
+  const preview = design.previewData || {};
+  const theme = getDesignTheme(design);
+  const photoRadius = getPhotoRadius(theme.photoShape);
+  const isSingleColumn = theme.singleColumn;
+  const previewColumns = isSingleColumn ? "1fr" : theme.sidebarFirst ? "72px 1fr" : "1fr 72px";
+  const previewSidebarFirst = theme.sidebarFirst && !isSingleColumn;
+
+  return (
+    <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ background: "#fff", borderRadius: theme.shellRadius, overflow: "hidden", border: `1.5px solid ${hov ? design.color : "#e8ecf4"}`, boxShadow: hov ? `0 12px 32px ${design.color}26` : "0 4px 12px rgba(15,23,42,0.06)", transition: "all 0.22s", cursor: "pointer" }}>
+      <div style={{ background: theme.headerBackground, padding: "16px 18px 14px", color: theme.headerTextColor, position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", inset: 0, opacity: theme.headerTextColor === "#ffffff" ? 0.16 : 0.5, background: isSingleColumn ? "repeating-linear-gradient(90deg, transparent 0px, transparent 30px, rgba(255,255,255,0.46) 30px, rgba(255,255,255,0.46) 31px)" : "radial-gradient(circle at top right, rgba(255,255,255,0.7) 0%, transparent 42%), linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.18) 48%, transparent 85%)" }} />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, position: "relative", zIndex: 1 }}>
+            <div style={{ width: 42, height: 42, borderRadius: photoRadius, background: theme.headerTextColor === "#ffffff" ? "rgba(255,255,255,0.16)" : `${design.color}14`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}>{design.icon}</div>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 14 }}>{design.name}</div>
+              <div style={{ fontSize: 11, color: theme.headerSecondaryColor }}>{getDesignVariantLabel(design.variant)}</div>
+            </div>
+          </div>
+          <span style={{ borderRadius: 999, background: theme.headerTextColor === "#ffffff" ? "rgba(255,255,255,0.16)" : `${design.color}14`, padding: "3px 8px", fontSize: 10.5, fontWeight: 700, position: "relative", zIndex: 1 }}>18 opțiuni</span>
+        </div>
+        <div style={{ marginTop: 14, background: theme.documentBackground, borderRadius: 14, padding: "10px 12px", position: "relative", zIndex: 1, border: `1px solid ${design.color}18`, color: "#0f172a" }}>
+          <div style={{ display: "grid", gridTemplateColumns: previewColumns, minHeight: 86, overflow: "hidden", borderRadius: 10 }}>
+            {previewSidebarFirst && <div style={{ background: theme.sidebarBackground, borderRight: theme.sidebarBorder, padding: "8px 7px" }}>
+              <div style={{ width: 28, height: 28, borderRadius: photoRadius, background: `${design.color}16`, marginBottom: 8 }} />
+              {["100%", "78%", "66%"].map((width, index) => <div key={index} style={{ height: 4, width, background: `${design.color}${index === 0 ? "55" : "22"}`, borderRadius: 999, marginBottom: 6 }} />)}
+            </div>}
+            <div style={{ padding: "8px 10px", background: theme.documentBackground }}>
+              <div style={{ fontSize: 11.5, fontWeight: 800, color: "#0f172a" }}>{preview.nume || "Prenume Nume"}</div>
+              <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>{design.previewRole}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 9 }}>
+                {(theme.skillMode === "chips" ? ["Profil", "Skills"] : ["Exp", "Educație"]).map((label) => (
+                  <span key={label} style={{ padding: "2px 6px", background: theme.skillMode === "chips" ? `${design.color}14` : "#f1f5f9", color: theme.skillMode === "chips" ? design.color : "#64748b", borderRadius: theme.sectionMode === "boxed" ? 6 : 999, fontSize: 9.5, fontWeight: 700 }}>
+                    {label}
+                  </span>
+                ))}
+              </div>
+              <div style={{ marginTop: 10 }}>
+                {["72%", "48%", "86%", "60%"].map((width, index) => <div key={index} style={{ height: 3, width, background: index === 0 ? `${design.color}` : `${design.color}33`, borderRadius: 999, marginBottom: 4 }} />)}
+              </div>
+            </div>
+            {!previewSidebarFirst && !isSingleColumn && <div style={{ background: theme.sidebarBackground, borderLeft: theme.sidebarBorder, padding: "8px 7px" }}>
+              <div style={{ width: "100%", height: 7, borderRadius: 999, background: `${design.color}24`, marginBottom: 8 }} />
+              {["88%", "64%", "76%"].map((width, index) => <div key={index} style={{ height: 4, width, background: `${design.color}${index === 0 ? "55" : "22"}`, borderRadius: 999, marginBottom: 6 }} />)}
+            </div>}
+          </div>
+        </div>
+      </div>
+      <div style={{ padding: "14px 17px 17px" }}>
+        <p style={{ margin: "0 0 10px", fontSize: 12.5, color: "#475569", lineHeight: 1.6 }}>{design.tagline}</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+          <span style={{ padding: "3px 8px", background: `${design.color}12`, color: design.color, borderRadius: 999, fontSize: 10.5, fontWeight: 700 }}>{getDesignVariantLabel(design.variant)}</span>
+          <span style={{ padding: "3px 8px", background: "#f8fafc", color: "#64748b", borderRadius: 999, fontSize: 10.5, fontWeight: 700 }}>{preview.titlu?.split(" / ")[0] || "Preview"}</span>
+        </div>
+        <button onClick={() => onSelect(design)} style={{ width: "100%", padding: "10px", borderRadius: 10, background: hov ? design.color : "#f8fafc", color: hov ? "#fff" : "#374151", border: `1.5px solid ${hov ? design.color : "#e2e8f0"}`, cursor: "pointer", fontWeight: 700, fontSize: 12.5, transition: "all 0.18s" }}>
+          {hov ? "Alege designul" : "Previzualizează designul →"}
         </button>
       </div>
     </div>
@@ -544,14 +1183,16 @@ function TemplateCard({ template, onSelect }) {
 const fBtn = { width: "100%", padding: "9px 14px", borderRadius: 9, cursor: "pointer", fontWeight: 600, fontSize: 12.5, textAlign: "center", boxSizing: "border-box" };
 
 export default function App() {
-  const { paymentInfo, checking, startPayment, verifyPayment } = useStripePayment();
+  const { paymentInfo, checking, startPayment, verifyPayment, startingCheckout, warmCheckout } = useStripePayment();
   const [tmpl, setTmpl] = useState(null);
+  const [selectedRole, setSelectedRole] = useState(null);
+  const [roleSeedData, setRoleSeedData] = useState(null);
   const [cvRO, setCvRO] = useState(null);
   const lang = "ro";
   const [photo, setPhoto] = useState(null);
   const [currentDocumentHash, setCurrentDocumentHash] = useState(null);
   const [search, setSearch] = useState("");
-  const [page, setPage] = useState("grid");
+  const [page, setPage] = useState("role");
   const [editMode, setEditMode] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -564,17 +1205,73 @@ export default function App() {
   const paidForCurrentDocument = Boolean(
     paymentInfo && currentDocumentHash && paymentInfo.documentHash === currentDocumentHash
   );
-
-  const filtered = cvTemplates.filter(t =>
-    t.job.toLowerCase().includes(search.toLowerCase()) ||
-    t.data.titlu.toLowerCase().includes(search.toLowerCase())
+  const selectedRoleName = selectedRole?.name || cvData?.titlu || "Rolul tău";
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredRoles = cvTemplates.filter(template =>
+    template.job.toLowerCase().includes(normalizedSearch) ||
+    template.data.titlu.toLowerCase().includes(normalizedSearch)
   );
+  const hasExactStarter = cvTemplates.some(template =>
+    template.job.toLowerCase() === normalizedSearch ||
+    template.data.titlu.toLowerCase() === normalizedSearch
+  );
+  const showCustomRoleCard = normalizedSearch.length > 1 && !hasExactStarter;
 
-  const select = (t) => {
-    setTmpl(t);
-    setCvRO(cloneData(t.data));
+  const handleRoleSelection = ({ name, source, seedData }) => {
+    const normalizedRole = normalizeString(name, 160);
+
+    if (!normalizedRole) {
+      return;
+    }
+
+    setSelectedRole({ name: normalizedRole, source });
+    setRoleSeedData(cloneData(seedData));
+    setTmpl(null);
+    setCvRO(null);
     setPhoto(null);
-    setEditMode(false);
+    setCurrentDocumentHash(null);
+    setEditMode(source === "custom");
+    setPage("designs");
+    setMobileView("cv");
+    window.scrollTo({ top: 0 });
+  };
+
+  const selectStarterRole = (profile) => {
+    handleRoleSelection({
+      name: profile.job,
+      source: "starter",
+      seedData: profile.data,
+    });
+  };
+
+  const selectCustomRole = (roleName) => {
+    const normalizedRole = normalizeString(roleName, 160);
+
+    if (!normalizedRole) {
+      return;
+    }
+
+    handleRoleSelection({
+      name: normalizedRole,
+      source: "custom",
+      seedData: createEmptyCvData(normalizedRole),
+    });
+  };
+
+  const selectDesign = (design, options = {}) => {
+    const preserveCurrent = options.preserveCurrent ?? Boolean(cvRO);
+
+    setTmpl(design);
+
+    if (!preserveCurrent) {
+      const nextSeed =
+        roleSeedData ||
+        createEmptyCvData(selectedRole?.name || design.previewRole || "Rolul tău");
+      setCvRO(cloneData(nextSeed));
+      setPhoto(null);
+      setEditMode(selectedRole?.source === "custom");
+    }
+
     setPage("editor");
     setMobileView("cv");
     window.scrollTo({ top: 0 });
@@ -589,7 +1286,7 @@ export default function App() {
     }
 
     createDocumentHash({
-      templateName: tmpl.job,
+      templateName: tmpl.key,
       color: tmpl.color,
       lang,
       cvData,
@@ -621,16 +1318,25 @@ export default function App() {
     }
 
     const restoredTemplate =
-      cvTemplates.find(template => template.id === pendingPurchase.templateId) ||
+      designCatalog.find(template => template.id === pendingPurchase.designId || template.key === pendingPurchase.designKey) ||
       {
-        id: pendingPurchase.templateId || 0,
-        job: pendingPurchase.templateName || "CV",
+        id: pendingPurchase.designId || 0,
+        key: pendingPurchase.designKey || "restored-design",
+        name: pendingPurchase.designName || "Design restaurat",
+        variant: "classic",
         color: pendingPurchase.color || "#1a56db",
         icon: "📄",
-        data: pendingPurchase.cvData,
+        tagline: "Design restaurat din sesiunea de plată",
+        previewData: pendingPurchase.cvData,
+        previewRole: pendingPurchase.roleName || pendingPurchase.cvData?.titlu || "Rol",
       };
 
     setTmpl(restoredTemplate);
+    setSelectedRole({
+      name: pendingPurchase.roleName || pendingPurchase.cvData?.titlu || "Rolul tău",
+      source: pendingPurchase.roleSource || "restored",
+    });
+    setRoleSeedData(cloneData(pendingPurchase.cvData));
     setCvRO(cloneData(pendingPurchase.cvData));
     setPhoto(pendingPurchase.photoDataUrl || null);
     setEditMode(false);
@@ -669,7 +1375,7 @@ export default function App() {
 
     try {
       const documentHash = await createDocumentHash({
-        templateName: tmpl.job,
+        templateName: tmpl.key,
         color: tmpl.color,
         lang,
         cvData,
@@ -689,7 +1395,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           downloadToken: activePayment.downloadToken,
-          templateName: tmpl.job,
+          templateName: tmpl.key,
           color: tmpl.color,
           lang,
           cvData,
@@ -737,6 +1443,7 @@ export default function App() {
       return;
     }
 
+    void warmCheckout();
     setShowPaywall(true);
   };
 
@@ -744,18 +1451,22 @@ export default function App() {
     if (!tmpl || !cvData) return;
 
     try {
-      setShowPaywall(false);
-      const documentHash = await createDocumentHash({
-        templateName: tmpl.job,
-        color: tmpl.color,
-        lang,
-        cvData,
-        photoDataUrl: photo,
-      });
+      const documentHash =
+        currentDocumentHash ||
+        await createDocumentHash({
+          templateName: tmpl.key,
+          color: tmpl.color,
+          lang,
+          cvData,
+          photoDataUrl: photo,
+        });
 
       savePendingPurchase({
-        templateId: tmpl.id,
-        templateName: tmpl.job,
+        designId: tmpl.id,
+        designKey: tmpl.key,
+        designName: tmpl.name,
+        roleName: selectedRoleName,
+        roleSource: selectedRole?.source || "custom",
         color: tmpl.color,
         lang,
         cvData,
@@ -765,7 +1476,7 @@ export default function App() {
       });
 
       await startPayment({
-        templateName: tmpl.job,
+        templateName: tmpl.key,
         lang,
         documentHash,
       });
@@ -781,11 +1492,16 @@ export default function App() {
       {/* ── PAYWALL MODAL ── */}
       {showPaywall && tmpl && (
         <PaywallModal
-          onClose={() => setShowPaywall(false)}
+          onClose={() => {
+            if (!startingCheckout) {
+              setShowPaywall(false);
+            }
+          }}
           onPay={handlePayNow}
-          templateName={tmpl.job}
+          templateName={selectedRoleName}
           lang={lang}
           color={tmpl.color}
+          isPaying={startingCheckout}
         />
       )}
 
@@ -822,7 +1538,8 @@ export default function App() {
 
           {page === "editor" && tmpl && cvData && (
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-              <button onClick={() => setPage("grid")} style={nb("#e2e8f0","#fff","#374151")}>← Template-uri</button>
+              <button onClick={() => setPage("designs")} style={nb("#e2e8f0","#fff","#374151")}>← Designuri</button>
+              <button onClick={() => setPage("role")} style={nb("#fde68a","#fffbeb","#92400e")}>↺ Job</button>
               <button onClick={() => fileRef.current.click()} style={nb("#bae6fd","#f0f9ff","#0369a1")}>{photo ? "🔄 Foto" : "📷 Foto"}</button>
 
               {/* Mobile switch in header */}
@@ -843,13 +1560,19 @@ export default function App() {
                 </div>
               </div>
 
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#f8fafc", border: "1.5px solid #e2e8f0", color: "#334155", borderRadius: 999, padding: "6px 10px", fontSize: 11.5, fontWeight: 700 }}>
+                <span>{selectedRoleName}</span>
+                <span style={{ color: "#94a3b8" }}>·</span>
+                <span style={{ color: tmpl.color }}>{tmpl.name}</span>
+              </div>
+
               <button onClick={() => setEditMode(e => !e)} style={nb(editMode ? "#fcd34d" : "#e2e8f0", editMode ? "#fffbeb" : "#fff", editMode ? "#92400e" : "#374151", 700)}>
                 {editMode ? "👁 Preview" : "✏️ Editează"}
               </button>
               {editMode && <button onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 2000); }} style={nb(saved ? "#059669" : "#bbf7d0", saved ? "#059669" : "#f0fdf4", saved ? "#fff" : "#059669", 700)}>{saved ? "✓ Salvat!" : "💾 Salvează"}</button>}
-              <button onClick={handleDownloadClick} disabled={exporting}
-                style={{ padding: "7px 16px", borderRadius: 8, background: paidForCurrentDocument ? "linear-gradient(135deg,#059669,#0d9488)" : exporting ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", cursor: exporting ? "not-allowed" : "pointer", fontWeight: 800, fontSize: 12.5, boxShadow: exporting ? "none" : `0 3px 10px ${tmpl.color}44` }}>
-                {exporting ? "⏳..." : paidForCurrentDocument ? "⬇️ PDF Securizat ✓" : "🔒 PDF RO — 19 RON"}
+              <button onClick={handleDownloadClick} disabled={exporting || startingCheckout}
+                style={{ padding: "7px 16px", borderRadius: 8, background: paidForCurrentDocument ? "linear-gradient(135deg,#059669,#0d9488)" : exporting || startingCheckout ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", cursor: exporting || startingCheckout ? "not-allowed" : "pointer", fontWeight: 800, fontSize: 12.5, boxShadow: exporting || startingCheckout ? "none" : `0 3px 10px ${tmpl.color}44` }}>
+                {exporting ? "⏳..." : startingCheckout ? "⏳ Stripe..." : paidForCurrentDocument ? "⬇️ PDF Securizat ✓" : "🔒 PDF RO — 19 RON"}
               </button>
             </div>
           )}
@@ -867,19 +1590,19 @@ export default function App() {
       )}
 
       {/* ── GRID ── */}
-      {page === "grid" && (
+      {page === "role" && (
         <div style={{ maxWidth: 1260, margin: "0 auto", padding: "34px 20px" }}>
           <div style={{ textAlign: "center", marginBottom: 40 }}>
-            <div style={{ display: "inline-block", background: "linear-gradient(135deg,#eff6ff,#faf5ff)", border: "1px solid #c7d2fe", borderRadius: 20, padding: "4px 14px", fontSize: 12, color: "#4338ca", fontWeight: 600, marginBottom: 12 }}>✦ 18 Template-uri · RO</div>
+            <div style={{ display: "inline-block", background: "linear-gradient(135deg,#eff6ff,#faf5ff)", border: "1px solid #c7d2fe", borderRadius: 20, padding: "4px 14px", fontSize: 12, color: "#4338ca", fontWeight: 600, marginBottom: 12 }}>✦ Orice job · 18 designuri · RO</div>
             <h1 style={{ fontSize: 38, fontWeight: 900, color: "#0f172a", margin: "0 0 10px", letterSpacing: "-1px", lineHeight: 1.2 }}>
-              Crează CV-ul Perfect<br />
+              Scrie jobul tău<br />
               <span style={{ background: "linear-gradient(135deg,#1a56db,#7c3aed)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>în 3 Minute</span>
             </h1>
             <p style={{ fontSize: 15.5, color: "#64748b", margin: "0 auto 24px", maxWidth: 500, lineHeight: 1.65 }}>
-              Editare live · Export PDF real · Optimizat ATS
+              Alegi rolul sau îl scrii din search, apoi îți alegi unul dintre cele 18 designuri.
             </p>
             <div style={{ display: "flex", justifyContent: "center", gap: 36, marginBottom: 32 }}>
-              {[["18","Template-uri"],["✏️","Editare Live"],["PDF","Export Real"]].map(([v,l]) => (
+              {[["18","Designuri"],["🔎","Rol liber"],["PDF","Export Real"]].map(([v,l]) => (
                 <div key={l} style={{ textAlign: "center" }}>
                   <div style={{ fontSize: 21, fontWeight: 800, color: "#1a56db" }}>{v}</div>
                   <div style={{ fontSize: 11.5, color: "#94a3b8" }}>{l}</div>
@@ -888,14 +1611,39 @@ export default function App() {
             </div>
             <div style={{ maxWidth: 390, margin: "0 auto", position: "relative" }}>
               <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#94a3b8", fontSize: 15 }}>🔍</span>
-              <input type="text" placeholder="Caută: casier, doctor, developer..." value={search} onChange={e => setSearch(e.target.value)}
+              <input type="text" placeholder="Scrie jobul tău: casier, electrician, barista..." value={search} onChange={e => setSearch(e.target.value)}
                 style={{ width: "100%", padding: "10px 14px 10px 36px", borderRadius: 11, border: "1.5px solid #e2e8f0", fontSize: 13.5, outline: "none", boxSizing: "border-box", background: "#fff", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }} />
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(288px, 1fr))", gap: 16 }}>
-            {filtered.map(t => <TemplateCard key={t.id} template={t} onSelect={select} />)}
+            {showCustomRoleCard && <CustomRoleCard roleName={search.trim()} onSelect={selectCustomRole} />}
+            {filteredRoles.map(role => <RoleCard key={role.id} profile={role} onSelect={selectStarterRole} />)}
           </div>
-          {!filtered.length && <div style={{ textAlign: "center", padding: "52px 0", color: "#94a3b8" }}><div style={{ fontSize: 40 }}>🔍</div><p>Nu s-au găsit template-uri pentru &quot;{search}&quot;</p></div>}
+          {!filteredRoles.length && !showCustomRoleCard && <div style={{ textAlign: "center", padding: "52px 0", color: "#94a3b8" }}><div style={{ fontSize: 40 }}>🔍</div><p>Nu s-au găsit roluri starter pentru &quot;{search}&quot;</p></div>}
+        </div>
+      )}
+
+      {page === "designs" && selectedRole && (
+        <div style={{ maxWidth: 1260, margin: "0 auto", padding: "34px 20px" }}>
+          <div style={{ textAlign: "center", marginBottom: 34 }}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "linear-gradient(135deg,#ecfeff,#eef2ff)", border: "1px solid #bfdbfe", borderRadius: 999, padding: "5px 14px", fontSize: 12, color: "#1d4ed8", fontWeight: 700, marginBottom: 14 }}>
+              <span>Rol selectat</span>
+              <span>{selectedRoleName}</span>
+            </div>
+            <h2 style={{ fontSize: 34, fontWeight: 900, color: "#0f172a", margin: "0 0 10px", letterSpacing: "-0.8px" }}>
+              Alege unul dintre cele 18 designuri
+            </h2>
+            <p style={{ margin: "0 auto 20px", maxWidth: 640, fontSize: 15.5, color: "#64748b", lineHeight: 1.65 }}>
+              Conținutul rămâne legat de rolul tău, iar aici schimbi doar stilul vizual: layout, ritm, accent și personalitate.
+            </p>
+            <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
+              <button onClick={() => setPage("role")} style={nb("#e2e8f0", "#fff", "#374151", 700)}>← Schimbă jobul</button>
+              {selectedRole?.source === "custom" && <span style={{ display: "inline-flex", alignItems: "center", padding: "6px 10px", borderRadius: 999, background: "#fff7ed", border: "1px solid #fdba74", color: "#9a3412", fontSize: 11.5, fontWeight: 700 }}>Rol custom</span>}
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(288px, 1fr))", gap: 16 }}>
+            {designCatalog.map(design => <DesignCard key={design.id} design={design} onSelect={selected => selectDesign(selected, { preserveCurrent: false })} />)}
+          </div>
         </div>
       )}
 
@@ -921,7 +1669,7 @@ export default function App() {
           </div>
           {/* CV Document */}
           <div className={`editor-doc ${mobileView !== "cv" ? "mobile-hidden" : ""}`} style={{ background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 6px 28px rgba(0,0,0,0.09)", border: `2px solid ${editMode ? "#fcd34d" : "#e8ecf4"}`, transition: "border 0.2s" }}>
-            <CVDocument cvData={cvData} setCvData={setCvData} color={tmpl.color} photoUrl={photo} onPhotoClick={() => fileRef.current.click()} editMode={editMode} lang={lang} />
+            <CVDocument cvData={cvData} setCvData={setCvData} design={tmpl} photoUrl={photo} onPhotoClick={() => fileRef.current.click()} editMode={editMode} lang={lang} />
           </div>
 
           {/* Right Panel */}
@@ -932,8 +1680,8 @@ export default function App() {
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
                 <span style={{ fontSize: 22 }}>{tmpl.icon}</span>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>{tmpl.job}</div>
-                  <div style={{ fontSize: 11, color: "#94a3b8" }}>Template #{tmpl.id} · 🇷🇴 Română</div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>{tmpl.name}</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8" }}>{selectedRoleName} · {getDesignVariantLabel(tmpl.variant)} · 🇷🇴</div>
                 </div>
               </div>
 
@@ -947,9 +1695,9 @@ export default function App() {
                   {editMode ? "👁 Ieși din editare" : "✏️ Editează CV-ul"}
                 </button>
 
-                <button onClick={handleDownloadClick} disabled={exporting}
-                  style={{ ...fBtn, padding: "12px", background: paidForCurrentDocument ? "linear-gradient(135deg,#059669,#0d9488)" : exporting ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", fontWeight: 800, fontSize: 14, cursor: exporting ? "not-allowed" : "pointer", boxShadow: exporting ? "none" : `0 4px 14px ${tmpl.color}44` }}>
-                  {exporting ? "⏳ Generare PDF..." : paidForCurrentDocument ? "⬇️ Descarcă PDF securizat ✓" : "🔒 Descarcă PDF — 19 RON"}
+                <button onClick={handleDownloadClick} disabled={exporting || startingCheckout}
+                  style={{ ...fBtn, padding: "12px", background: paidForCurrentDocument ? "linear-gradient(135deg,#059669,#0d9488)" : exporting || startingCheckout ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", fontWeight: 800, fontSize: 14, cursor: exporting || startingCheckout ? "not-allowed" : "pointer", boxShadow: exporting || startingCheckout ? "none" : `0 4px 14px ${tmpl.color}44` }}>
+                  {exporting ? "⏳ Generare PDF..." : startingCheckout ? "⏳ Se conectează la Stripe..." : paidForCurrentDocument ? "⬇️ Descarcă PDF securizat ✓" : "🔒 Descarcă PDF — 19 RON"}
                 </button>
               </div>
             </div>
@@ -972,18 +1720,18 @@ export default function App() {
 
             {/* Other templates */}
             <div style={{ background: "#fff", border: "1.5px solid #e8ecf4", borderRadius: 14, padding: 15 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 11 }}>Alte Template-uri</div>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 11 }}>Alte Designuri</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {cvTemplates.filter(t => t.id !== tmpl.id).slice(0, 4).map(t => (
-                  <button key={t.id} onClick={() => select(t)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #f1f5f9", background: "#fafbfc", cursor: "pointer", textAlign: "left" }}>
+                {designCatalog.filter(t => t.id !== tmpl.id).slice(0, 4).map(t => (
+                  <button key={t.id} onClick={() => selectDesign(t, { preserveCurrent: true })} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #f1f5f9", background: "#fafbfc", cursor: "pointer", textAlign: "left" }}>
                     <div style={{ width: 28, height: 28, borderRadius: 7, background: `${t.color}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{t.icon}</div>
                     <div>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "#0f172a" }}>{t.job}</div>
-                      <div style={{ fontSize: 10.5, color: "#94a3b8" }}>{t.data.titlu.split(" / ")[0]}</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: "#0f172a" }}>{t.name}</div>
+                      <div style={{ fontSize: 10.5, color: "#94a3b8" }}>{getDesignVariantLabel(t.variant)}</div>
                     </div>
                   </button>
                 ))}
-                <button onClick={() => setPage("grid")} style={{ padding: "7px 10px", borderRadius: 8, border: "1.5px dashed #cbd5e1", background: "transparent", cursor: "pointer", color: "#64748b", fontSize: 12 }}>+ Toate cele 18 template-uri</button>
+                <button onClick={() => setPage("designs")} style={{ padding: "7px 10px", borderRadius: 8, border: "1.5px dashed #cbd5e1", background: "transparent", cursor: "pointer", color: "#64748b", fontSize: 12 }}>+ Toate cele 18 designuri</button>
               </div>
             </div>
           </div>
@@ -991,7 +1739,7 @@ export default function App() {
       )}
 
       <footer style={{ borderTop: "1px solid #e8ecf4", background: "#fff", padding: "18px 20px", textAlign: "center", marginTop: 36 }}>
-        <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>© 2025 CVPerfect.online · 18 Template-uri · RO · Export PDF · ATS Optimizat</p>
+        <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>© 2025 CVPerfect.online · Orice job · 18 designuri · Export PDF · ATS Optimizat</p>
       </footer>
     </div>
   );
