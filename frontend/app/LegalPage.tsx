@@ -121,14 +121,14 @@ export default function LegalPage({
     <main style={styles.page}>
       <div style={styles.shell}>
         <Link href="/" style={styles.backLink}>
-          ← Înapoi la CVPerfect
+          ← Back to CVPerfect
         </Link>
 
         <article style={styles.card}>
           <div style={styles.eyebrow}>{eyebrow}</div>
           <h1 style={styles.title}>{title}</h1>
           <p style={styles.intro}>{intro}</p>
-          <p style={styles.meta}>Ultima actualizare: {updatedAt}</p>
+          <p style={styles.meta}>Last updated: {updatedAt}</p>
           <hr style={styles.divider} />
 
           <div style={styles.content}>{children}</div>

@@ -18,9 +18,9 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: "CVPerfect.online — 18 template-uri CV, editare rapidă și export PDF",
+  title: "CVPerfect.online — 18 CV designs, fast editing, real PDF export",
   description:
-    "Construiește un CV care arată profesionist în 3 minute. Alege dintre 18 template-uri curate, optimizate pentru ATS. Completezi datele o singură dată, exporți PDF real.",
+    "Build a professional CV in 3 minutes. Choose from 18 clean, ATS-friendly designs, edit once, and export a real PDF.",
   alternates: {
     canonical: "/",
   },
@@ -32,7 +32,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ro">
+    <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

@@ -9,7 +9,7 @@ import LegalPage, {
 export const metadata: Metadata = {
   title: "GDPR | CVPerfect.online",
   description:
-    "Informații GDPR despre categoriile de date, scopurile prelucrării, destinatari și drepturile utilizatorilor CVPerfect.online.",
+    "GDPR information about data categories, processing purposes, recipients, and user rights for CVPerfect.online.",
   alternates: {
     canonical: "/gdpr",
   },
@@ -19,96 +19,95 @@ export default function GdprPage() {
   return (
     <LegalPage
       eyebrow="GDPR"
-      title="Informații GDPR"
-      intro="Această pagină explică, pe scurt și clar, cum sunt tratate datele personale atunci când folosești CVPerfect.online pentru editarea CV-ului, inițierea plății și descărcarea PDF-ului securizat."
-      updatedAt="31 martie 2026"
+      title="GDPR Information"
+      intro="This page explains, in a short and practical way, how personal data is handled when you use CVPerfect.online to edit your CV, start a payment, and download a secure PDF."
+      updatedAt="March 31, 2026"
     >
       <section style={legalSectionStyle}>
-        <h2 style={legalSectionTitleStyle}>1. Categorii de date personale</h2>
+        <h2 style={legalSectionTitleStyle}>1. Categories of personal data</h2>
         <p style={legalParagraphStyle}>
-          În funcție de cum folosești serviciul, putem prelucra datele introduse
-          de tine în CV, inclusiv nume, adresă de email, telefon, oraș,
-          profil LinkedIn, rezumat profesional, experiență, educație,
-          competențe, limbi, certificări și fotografie, dacă alegi să o încarci.
+          Depending on how you use the service, we may process the data you add
+          to your CV, including your name, email address, phone number, city,
+          LinkedIn profile, professional summary, experience, education, skills,
+          languages, certifications, and photo if you choose to upload one.
         </p>
       </section>
 
       <section style={legalSectionStyle}>
-        <h2 style={legalSectionTitleStyle}>2. Scopurile prelucrării</h2>
+        <h2 style={legalSectionTitleStyle}>2. Purposes of processing</h2>
         <ul style={legalListStyle}>
-          <li>editarea și personalizarea CV-ului direct în browser;</li>
-          <li>inițierea și verificarea plății pentru exportul PDF;</li>
-          <li>generarea și livrarea PDF-ului securizat după confirmarea plății;</li>
-          <li>prevenirea abuzului, a fraudelor și rezolvarea erorilor tehnice;</li>
-          <li>respectarea obligațiilor legale aplicabile.</li>
+          <li>editing and customizing the CV directly in the browser;</li>
+          <li>starting and verifying payment for PDF export;</li>
+          <li>generating and delivering the secure PDF after payment confirmation;</li>
+          <li>preventing abuse, fraud, and technical failures;</li>
+          <li>complying with applicable legal obligations.</li>
         </ul>
       </section>
 
       <section style={legalSectionStyle}>
-        <h2 style={legalSectionTitleStyle}>3. Temeiuri legale</h2>
+        <h2 style={legalSectionTitleStyle}>3. Legal bases</h2>
         <ul style={legalListStyle}>
-          <li>executarea serviciului solicitat de tine;</li>
-          <li>interesul legitim de a securiza platforma și de a preveni utilizările abuzive;</li>
-          <li>obligații legale privind evidențele financiare și conformitatea;</li>
-          <li>consimțământul tău, acolo unde alegi să furnizezi date opționale.</li>
+          <li>performance of the service you request;</li>
+          <li>legitimate interest in securing the platform and preventing misuse;</li>
+          <li>legal obligations related to financial records and compliance;</li>
+          <li>your consent where you choose to provide optional data.</li>
         </ul>
       </section>
 
       <section style={legalSectionStyle}>
-        <h2 style={legalSectionTitleStyle}>4. Destinatari și furnizori implicați</h2>
+        <h2 style={legalSectionTitleStyle}>4. Recipients and service providers</h2>
         <p style={legalParagraphStyle}>
-          Pentru procesarea plăților este folosit Stripe. Infrastructura tehnică
-          poate implica furnizori de hosting și servicii necesare funcționării
-          aplicației. Datele cardului nu sunt stocate de CVPerfect.online în
-          codul actual al aplicației; ele sunt procesate de Stripe conform
-          propriilor sale politici și standarde de securitate.
+          Stripe is used for payment processing. The technical infrastructure
+          may also involve hosting providers and other services required to keep
+          the application running. Card details are not stored by CVPerfect.online
+          in the current implementation; they are processed by Stripe according
+          to Stripe&apos;s own policies and security standards.
         </p>
       </section>
 
       <section style={legalSectionStyle}>
-        <h2 style={legalSectionTitleStyle}>5. Stocare și retenție</h2>
+        <h2 style={legalSectionTitleStyle}>5. Storage and retention</h2>
         <p style={legalParagraphStyle}>
-          În fluxul actual, editarea CV-ului se face în principal în browserul
-          tău. Pentru checkout se transmite către server un identificator tehnic
-          al documentului, iar pentru generarea PDF-ului sunt transmise datele
-          necesare randării fișierului. Codul curent nu arată o bază de date
-          dedicată pentru arhivarea CV-urilor, însă anumite date legate de
-          sesiunea de cumpărare pot rămâne temporar în browser, inclusiv în
-          `localStorage`, până la finalizarea descărcării sau până când ștergi
-          datele site-ului.
+          In the current flow, CV editing happens mainly inside your browser.
+          For checkout, a technical document identifier is sent to the server,
+          and for PDF generation the data needed to render the file is sent as
+          part of that request. The current codebase does not show a dedicated
+          database for archiving CVs, but some purchase-session data may remain
+          temporarily in the browser, including in `localStorage`, until the
+          download is completed or until you clear the site data yourself.
         </p>
       </section>
 
       <section style={legalSectionStyle}>
-        <h2 style={legalSectionTitleStyle}>6. Drepturile tale</h2>
+        <h2 style={legalSectionTitleStyle}>6. Your rights</h2>
         <ul style={legalListStyle}>
-          <li>dreptul de acces la date;</li>
-          <li>dreptul la rectificare;</li>
-          <li>dreptul la ștergere, în condițiile legii;</li>
-          <li>dreptul la restricționarea prelucrării;</li>
-          <li>dreptul la opoziție;</li>
-          <li>dreptul la portabilitatea datelor;</li>
-          <li>dreptul de a depune o plângere la autoritatea competentă.</li>
+          <li>the right of access;</li>
+          <li>the right to rectification;</li>
+          <li>the right to erasure, where legally applicable;</li>
+          <li>the right to restriction of processing;</li>
+          <li>the right to object;</li>
+          <li>the right to data portability;</li>
+          <li>the right to lodge a complaint with the competent authority.</li>
         </ul>
       </section>
 
       <section style={legalSectionStyle}>
-        <h2 style={legalSectionTitleStyle}>7. Exercitarea drepturilor</h2>
+        <h2 style={legalSectionTitleStyle}>7. How to exercise your rights</h2>
         <p style={legalParagraphStyle}>
-          Pentru solicitări privind datele personale, folosește canalul de
-          contact comunicat de operatorul site-ului CVPerfect.online în cadrul
-          relației comerciale sau în datele de contact afișate pe site. Dacă
-          legislația o cere, este posibil să solicităm informații minime pentru
-          verificarea identității înainte de a răspunde.
+          For requests related to personal data, use the contact channel shared
+          by the operator of CVPerfect.online during the commercial relationship
+          or in the contact details displayed on the site. Where required by
+          law, we may ask for minimal information to verify identity before
+          responding.
         </p>
       </section>
 
       <section style={legalSectionStyle}>
-        <h2 style={legalSectionTitleStyle}>8. Măsuri de securitate</h2>
+        <h2 style={legalSectionTitleStyle}>8. Security measures</h2>
         <p style={legalParagraphStyle}>
-          Sunt folosite măsuri tehnice și organizatorice rezonabile pentru a
-          limita accesul neautorizat, pentru a proteja fluxul de plată și pentru
-          a reduce riscul modificării sau divulgării nepermise a datelor.
+          Reasonable technical and organizational measures are used to limit
+          unauthorized access, protect the payment flow, and reduce the risk of
+          improper modification or disclosure of data.
         </p>
       </section>
     </LegalPage>

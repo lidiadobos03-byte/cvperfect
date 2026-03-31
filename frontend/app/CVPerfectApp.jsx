@@ -3,9 +3,46 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
+import {
+  getCopy,
+  getLocalizedDesignTagline,
+  getLocalizedVariantLabel,
+  getStarterRoleCopy,
+  getStarterRoleName,
+  normalizeUiLang,
+  UI_LANGUAGE_STORAGE_KEY,
+} from "./i18n";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://cvperfect-backend.onrender.com";
 const PENDING_PURCHASE_STORAGE_KEY = "cvperfect.pendingPurchase";
+
+function syncLanguageInUrl(lang, options = {}) {
+  const { removePaymentParams = false } = options;
+
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+
+  if (removePaymentParams) {
+    url.searchParams.delete("payment");
+    url.searchParams.delete("session_id");
+  }
+
+  if (normalizeUiLang(lang) === "ro") {
+    url.searchParams.set("lang", "ro");
+  } else {
+    url.searchParams.delete("lang");
+  }
+
+  const nextPath = `${url.pathname}${url.search}${url.hash}`;
+  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+
+  if (nextPath !== currentPath) {
+    window.history.replaceState({}, "", nextPath);
+  }
+}
 
 function normalizeString(value, maxLength = 4000) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -134,7 +171,8 @@ function parseFilenameFromDisposition(header) {
   return basicMatch?.[1] || null;
 }
 
-function useStripePayment() {
+function useStripePayment(lang) {
+  const copy = getCopy(lang);
   const [paymentInfo, setPaymentInfo] = useState(null);
   const [checking, setChecking] = useState(false);
   const [startingCheckout, setStartingCheckout] = useState(false);
@@ -144,6 +182,7 @@ function useStripePayment() {
   const lastWarmupAtRef = useRef(0);
   const preparedCheckoutRef = useRef(null);
   const preparePromiseRef = useRef(null);
+  const verifyPaymentRef = useRef(null);
 
   const fetchCheckoutUrl = async ({ templateName, lang, documentHash }) => {
     const res = await fetch(`${API_URL}/create-checkout`, {
@@ -154,11 +193,11 @@ function useStripePayment() {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      throw new Error(data.error || "Eroare la inițierea plății.");
+      throw new Error(data.error || copy.errors.paymentInit);
     }
 
     if (!data.url) {
-      throw new Error("Eroare la inițierea plății. Încearcă din nou.");
+      throw new Error(copy.errors.paymentRetry);
     }
 
     return data.url;
@@ -232,7 +271,7 @@ function useStripePayment() {
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      throw new Error(data.error || "Nu s-a putut verifica plata.");
+      throw new Error(data.error || copy.errors.paymentVerify);
     }
 
     if (data.paid && data.downloadToken) {
@@ -248,12 +287,14 @@ function useStripePayment() {
 
     if (data.requiresNewCheckout) {
       setPaymentInfo(null);
-      throw new Error("Checkout-ul vechi nu poate genera PDF-ul securizat. Repornește plata din editor.");
+      throw new Error(copy.errors.legacyCheckout);
     }
 
     setPaymentInfo(null);
     return null;
   };
+
+  verifyPaymentRef.current = verifyPayment;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -262,17 +303,17 @@ function useStripePayment() {
 
     if (payment === "success" && sessionId) {
       setChecking(true);
-      verifyPayment(sessionId)
+      verifyPaymentRef.current(sessionId)
         .then(() => {
-          window.history.replaceState({}, "", window.location.pathname);
+          syncLanguageInUrl(lang, { removePaymentParams: true });
         })
         .catch(error => {
           console.error(error);
-          alert(error.message || "Nu s-a putut verifica plata.");
+          alert(error.message || copy.errors.paymentVerify);
         })
         .finally(() => setChecking(false));
     }
-  }, []);
+  }, [copy.errors.paymentVerify, lang]);
 
   useEffect(() => {
     const scheduleWarmup = () => {
@@ -316,7 +357,7 @@ function useStripePayment() {
       window.location.href = checkoutUrl;
     } catch (e) {
       console.error(e);
-      alert(e.message || "Nu s-a putut conecta la server. Verifică conexiunea.");
+      alert(e.message || copy.errors.serverConnection);
     } finally {
       setStartingCheckout(false);
     }
@@ -337,12 +378,13 @@ function useStripePayment() {
 
 // ─── PAYWALL MODAL ────────────────────────────────────────────────────────────
 function PaywallModal({ onClose, onPay, templateName, lang, color, isPaying, isPreparingCheckout, checkoutReady }) {
-  const langLabel = lang === "en" ? "English" : "Română 🇷🇴";
+  const copy = getCopy(lang);
+  const langLabel = lang === "en" ? copy.common.englishLabel : copy.common.romanianLabel;
   const paymentButtonLabel = isPaying
-    ? "⏳ Se deschide Stripe..."
+    ? copy.paywall.openingStripe
     : isPreparingCheckout && !checkoutReady
-      ? "⏳ Pregătim plata..."
-      : "💳 Plătește 19 RON & Descarcă";
+      ? copy.paywall.preparingPayment
+      : copy.paywall.payNow;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.7)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -354,26 +396,21 @@ function PaywallModal({ onClose, onPay, templateName, lang, color, isPaying, isP
         <div style={{ width: 64, height: 64, borderRadius: 16, background: `linear-gradient(135deg, ${color}, #7c3aed)`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", fontSize: 30 }}>📄</div>
 
         {/* Title */}
-        <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 800, color: "#0f172a", textAlign: "center" }}>Descarcă CV-ul tău</h2>
+        <h2 style={{ margin: "0 0 8px", fontSize: 22, fontWeight: 800, color: "#0f172a", textAlign: "center" }}>{copy.paywall.title}</h2>
         <p style={{ margin: "0 0 24px", fontSize: 14, color: "#64748b", textAlign: "center", lineHeight: 1.6 }}>
-          CV-ul tău profesional <strong>{templateName}</strong> ({langLabel}) este gata de descărcat.
+          <strong>{templateName}</strong> ({langLabel}) {copy.paywall.readySuffix}
         </p>
 
         {/* Price box */}
         <div style={{ background: "linear-gradient(135deg, #f0f9ff, #eff6ff)", border: "1.5px solid #bfdbfe", borderRadius: 14, padding: "20px 24px", marginBottom: 20, textAlign: "center" }}>
-          <div style={{ fontSize: 13, color: "#64748b", marginBottom: 4 }}>Preț descărcare</div>
+          <div style={{ fontSize: 13, color: "#64748b", marginBottom: 4 }}>{copy.paywall.priceLabel}</div>
           <div style={{ fontSize: 42, fontWeight: 900, color: "#0f172a", letterSpacing: "-1px" }}>19 <span style={{ fontSize: 22 }}>RON</span></div>
-          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>plată unică · fără abonament</div>
+          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>{copy.paywall.oneTime}</div>
         </div>
 
         {/* Benefits */}
         <div style={{ marginBottom: 24 }}>
-          {[
-            "✅ PDF profesional format A4 european",
-            "✅ Optimizat ATS — trecut prin filtre HR",
-            "✅ PDF generat securizat pe server după plată",
-            "✅ Plată securizată prin Stripe 🔒",
-          ].map((b, i) => (
+          {copy.paywall.benefits.map((b, i) => (
             <div key={i} style={{ fontSize: 13, color: "#374151", marginBottom: 8 }}>{b}</div>
           ))}
         </div>
@@ -387,13 +424,13 @@ function PaywallModal({ onClose, onPay, templateName, lang, color, isPaying, isP
         {(isPaying || isPreparingCheckout) && (
           <p style={{ margin: "0 0 12px", fontSize: 12, color: "#64748b", textAlign: "center", lineHeight: 1.5 }}>
             {checkoutReady && !isPaying
-              ? "Conexiunea de plată este pregătită. Poți continua imediat."
-              : "Prima deschidere poate dura puțin dacă backend-ul se trezește din standby."}
+              ? copy.paywall.checkoutReady
+              : copy.paywall.wakeUp}
           </p>
         )}
 
         <p style={{ margin: 0, fontSize: 11, color: "#94a3b8", textAlign: "center" }}>
-          🔒 Plată securizată prin Stripe · Visa, Mastercard, Google Pay
+          {copy.paywall.secureFooter}
         </p>
       </div>
     </div>
@@ -474,15 +511,8 @@ function createEmptyCvData(roleName) {
   };
 }
 
-function getDesignVariantLabel(variant) {
-  return {
-    classic: "ATS Clean",
-    executive: "Executive",
-    soft: "Soft Modern",
-    sidebar: "Sidebar Bold",
-    serif: "Editorial",
-    minimal: "Minimal",
-  }[variant] || "Modern";
+function getDesignVariantLabel(variant, lang = "ro") {
+  return getLocalizedVariantLabel(variant, lang);
 }
 
 const DESIGN_THEME_OVERRIDES = {
@@ -878,6 +908,7 @@ function DocumentSection({ title, color, theme, compact, children }) {
 
 // ─── CV DOCUMENT ──────────────────────────────────────────────────────────────
 function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMode, lang }) {
+  const copy = getCopy(lang);
   const color = design?.color || "#1a56db";
   const theme = getDesignTheme(design);
   const darkHeader = theme.headerTextColor === "#ffffff";
@@ -885,9 +916,7 @@ function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMod
   const set = (k, v) => setCvData(p => ({ ...p, [k]: v }));
   const setN = (arr, i, f, v) => setCvData(p => { const a = JSON.parse(JSON.stringify(p[arr])); a[i][f] = v; return { ...p, [arr]: a }; });
   const setL = (arr, i, v) => setCvData(p => { const a = [...p[arr]]; a[i] = v; return { ...p, [arr]: a }; });
-  const labels = lang === "en"
-    ? { profil: "Professional Profile", exp: "Professional Experience", edu: "Education", comp: "Skills", limbi: "Languages", cert: "Certifications" }
-    : { profil: "Profil Profesional", exp: "Experiență Profesională", edu: "Educație", comp: "Competențe", limbi: "Limbi Străine", cert: "Certificări" };
+  const labels = copy.document.sections;
 
   const contactEntries = [
     { key: "email", icon: "📧", value: cvData.email },
@@ -936,7 +965,7 @@ function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMod
                   onClick={() => setCvData(p => ({ ...p, competente: p.competente.filter((_, skillIndex) => skillIndex !== index) }))}
                   style={{ marginTop: 4, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer", alignSelf: "flex-start" }}
                 >
-                  Șterge
+                  {copy.document.delete}
                 </button>
               )}
             </div>
@@ -951,7 +980,7 @@ function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMod
                 onClick={() => setCvData(p => ({ ...p, competente: p.competente.filter((_, skillIndex) => skillIndex !== index) }))}
                 style={{ marginTop: 4, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer" }}
               >
-                Șterge
+                {copy.document.delete}
               </button>
             )}
             <div style={{ height: 3.5, background: "#e2e8f0", borderRadius: 999, marginTop: 3 }}>
@@ -965,7 +994,7 @@ function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMod
           onClick={() => setCvData(p => ({ ...p, competente: [...p.competente, ""] }))}
           style={{ marginTop: 4, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11, padding: "5px 7px", borderRadius: 7, cursor: "pointer" }}
         >
-          + Adaugă competență
+          {copy.document.addSkill}
         </button>
       )}
     </DocumentSection>
@@ -982,7 +1011,7 @@ function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMod
               onClick={() => setCvData(p => ({ ...p, limbi: p.limbi.filter((_, languageIndex) => languageIndex !== index) }))}
               style={{ border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer" }}
             >
-              Șterge
+              {copy.document.delete}
             </button>
           )}
         </div>
@@ -992,7 +1021,7 @@ function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMod
           onClick={() => setCvData(p => ({ ...p, limbi: [...p.limbi, ""] }))}
           style={{ marginTop: 4, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11, padding: "5px 7px", borderRadius: 7, cursor: "pointer" }}
         >
-          + Adaugă limbă
+          {copy.document.addLanguage}
         </button>
       )}
     </DocumentSection>
@@ -1008,7 +1037,7 @@ function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMod
               onClick={() => setCvData(p => ({ ...p, certificari: p.certificari.filter((_, certificateIndex) => certificateIndex !== index) }))}
               style={{ marginTop: 4, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 10.5, padding: "1px 5px", borderRadius: 6, cursor: "pointer" }}
             >
-              Șterge
+              {copy.document.delete}
             </button>
           )}
         </div>
@@ -1018,7 +1047,7 @@ function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMod
           onClick={() => setCvData(p => ({ ...p, certificari: [...p.certificari, ""] }))}
           style={{ marginTop: 4, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11, padding: "5px 7px", borderRadius: 7, cursor: "pointer" }}
         >
-          + Adaugă certificare
+          {copy.document.addCertification}
         </button>
       )}
     </DocumentSection>
@@ -1035,7 +1064,7 @@ function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMod
   const mainContent = (
     <>
       <DocumentSection title={labels.profil} color={color} theme={theme}>
-        <EditableTextMulti value={cvData.despre} onChange={value => set("despre", value)} editMode={editMode} style={{ fontSize: 13, lineHeight: 1.7, color: "#444", display: "block", width: "100%" }} placeholder="Profil profesional..." />
+        <EditableTextMulti value={cvData.despre} onChange={value => set("despre", value)} editMode={editMode} style={{ fontSize: 13, lineHeight: 1.7, color: "#444", display: "block", width: "100%" }} placeholder={copy.document.profilePlaceholder} />
       </DocumentSection>
 
       <DocumentSection title={labels.exp} color={color} theme={theme}>
@@ -1051,56 +1080,56 @@ function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMod
               </div>
             </div>
             {editMode
-              ? <EF value={exp.desc} onChange={value => setN("experienta", index, "desc", value)} multiline style={{ fontSize: 12.5, color: "#555", marginTop: 6 }} placeholder="Realizări separate cu •" />
+              ? <EF value={exp.desc} onChange={value => setN("experienta", index, "desc", value)} multiline style={{ fontSize: 12.5, color: "#555", marginTop: 6 }} placeholder={copy.document.achievementsPlaceholder} />
               : <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{exp.desc.split(" • ").filter(Boolean).map((item, bulletIndex) => <li key={bulletIndex} style={{ fontSize: 12.5, lineHeight: 1.6, color: "#555", marginBottom: 2 }}>{item}</li>)}</ul>}
             {editMode && (
               <button
                 onClick={() => setCvData(p => ({ ...p, experienta: p.experienta.filter((_, experienceIndex) => experienceIndex !== index) }))}
                 style={{ marginTop: 6, border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 11, padding: "2px 6px", borderRadius: 6, cursor: "pointer" }}
               >
-                Șterge experiența
+                {copy.document.deleteExperience}
               </button>
             )}
           </div>
         ))}
         {editMode && (
-          <button
-            onClick={() => setCvData(p => ({ ...p, experienta: [...p.experienta, { firma: "", perioada: "", rol: "", desc: "" }] }))}
-            style={{ marginTop: 6, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11.5, padding: "6px 8px", borderRadius: 7, cursor: "pointer" }}
-          >
-            + Adaugă experiență
-          </button>
-        )}
+        <button
+          onClick={() => setCvData(p => ({ ...p, experienta: [...p.experienta, { firma: "", perioada: "", rol: "", desc: "" }] }))}
+          style={{ marginTop: 6, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11.5, padding: "6px 8px", borderRadius: 7, cursor: "pointer" }}
+        >
+          {copy.document.addExperience}
+        </button>
+      )}
       </DocumentSection>
 
       <DocumentSection title={labels.edu} color={color} theme={theme}>
         {cvData.educatie.map((edu, index) => (
           <div key={index} style={{ marginBottom: 10, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start", ...(itemSurfaceStyle || {}) }}>
             <div style={{ flex: 1 }}>
-              <EditableText value={edu.diploma} onChange={value => setN("educatie", index, "diploma", value)} editMode={editMode} style={{ display: "block", fontWeight: 700, fontSize: 13 }} placeholder="Diplomă / Curs" />
-              <EditableText value={edu.institutie} onChange={value => setN("educatie", index, "institutie", value)} editMode={editMode} style={{ display: "block", color, fontSize: 12.5 }} placeholder="Instituție" />
+              <EditableText value={edu.diploma} onChange={value => setN("educatie", index, "diploma", value)} editMode={editMode} style={{ display: "block", fontWeight: 700, fontSize: 13 }} placeholder={copy.document.degreePlaceholder} />
+              <EditableText value={edu.institutie} onChange={value => setN("educatie", index, "institutie", value)} editMode={editMode} style={{ display: "block", color, fontSize: 12.5 }} placeholder={copy.document.institutionPlaceholder} />
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <EditableText value={edu.perioada} onChange={value => setN("educatie", index, "perioada", value)} editMode={editMode} style={{ fontSize: 11.5, color: "#888", whiteSpace: "nowrap" }} placeholder="Perioadă" />
+              <EditableText value={edu.perioada} onChange={value => setN("educatie", index, "perioada", value)} editMode={editMode} style={{ fontSize: 11.5, color: "#888", whiteSpace: "nowrap" }} placeholder={copy.document.periodPlaceholder} />
               {editMode && (
                 <button
                   onClick={() => setCvData(p => ({ ...p, educatie: p.educatie.filter((_, educationIndex) => educationIndex !== index) }))}
                   style={{ border: "none", background: "#fee2e2", color: "#b91c1c", fontSize: 11, padding: "2px 6px", borderRadius: 6, cursor: "pointer" }}
                 >
-                  Șterge
+                  {copy.document.delete}
                 </button>
               )}
             </div>
           </div>
         ))}
         {editMode && (
-          <button
-            onClick={() => setCvData(p => ({ ...p, educatie: [...p.educatie, { institutie: "", perioada: "", diploma: "" }] }))}
-            style={{ marginTop: 6, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11.5, padding: "6px 8px", borderRadius: 7, cursor: "pointer" }}
-          >
-            + Adaugă educație
-          </button>
-        )}
+        <button
+          onClick={() => setCvData(p => ({ ...p, educatie: [...p.educatie, { institutie: "", perioada: "", diploma: "" }] }))}
+          style={{ marginTop: 6, border: "1.5px dashed #cbd5e1", background: "#f8fafc", color: "#475569", fontSize: 11.5, padding: "6px 8px", borderRadius: 7, cursor: "pointer" }}
+        >
+          {copy.document.addEducation}
+        </button>
+      )}
       </DocumentSection>
 
       {theme.singleColumn && sideContent}
@@ -1113,10 +1142,10 @@ function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMod
         <div style={{ position: "absolute", inset: 0, opacity: darkHeader ? 0.16 : 0.45, background: design?.variant === "minimal" || design?.variant === "serif" ? "repeating-linear-gradient(90deg, transparent 0px, transparent 34px, rgba(255,255,255,0.5) 34px, rgba(255,255,255,0.5) 35px)" : "radial-gradient(circle at top right, rgba(255,255,255,0.7) 0%, transparent 42%), linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.14) 48%, transparent 85%)", pointerEvents: "none" }} />
         <div onClick={onPhotoClick} style={{ flexShrink: 0, cursor: "pointer" }}>
           {photoUrl
-            ? <Image src={photoUrl} alt="foto" width={96} height={96} unoptimized style={{ width: 96, height: 96, borderRadius: photoRadius, objectFit: "cover", border: theme.photoBorder, boxShadow: "0 8px 18px rgba(15,23,42,0.08)", position: "relative", zIndex: 1 }} />
+            ? <Image src={photoUrl} alt={copy.document.photoAlt} width={96} height={96} unoptimized style={{ width: 96, height: 96, borderRadius: photoRadius, objectFit: "cover", border: theme.photoBorder, boxShadow: "0 8px 18px rgba(15,23,42,0.08)", position: "relative", zIndex: 1 }} />
             : <div style={{ width: 96, height: 96, borderRadius: photoRadius, background: darkHeader ? "rgba(255,255,255,0.14)" : `${color}12`, border: darkHeader ? "3px dashed rgba(255,255,255,0.4)" : `3px dashed ${color}35`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative", zIndex: 1 }}>
                 <span style={{ fontSize: 24 }}>📷</span>
-                <span style={{ fontSize: 9, color: darkHeader ? "rgba(255,255,255,0.8)" : "#64748b", marginTop: 3 }}>Photo</span>
+                <span style={{ fontSize: 9, color: darkHeader ? "rgba(255,255,255,0.8)" : "#64748b", marginTop: 3 }}>{copy.document.photoPlaceholder}</span>
               </div>}
         </div>
         <div style={{ flex: 1, minWidth: 0, position: "relative", zIndex: 1 }}>
@@ -1160,9 +1189,11 @@ function CVDocument({ cvData, setCvData, design, photoUrl, onPhotoClick, editMod
   );
 }
 
-function RoleCard({ profile, onSelect }) {
+function RoleCard({ profile, onSelect, lang }) {
+  const copy = getCopy(lang);
   const [hov, setHov] = useState(false);
-  const { data, color, icon, job } = profile;
+  const { data, color, icon } = profile;
+  const roleCopy = getStarterRoleCopy(profile, lang);
 
   return (
     <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
@@ -1172,46 +1203,49 @@ function RoleCard({ profile, onSelect }) {
           <div style={{ width: 42, height: 42, borderRadius: "50%", background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}>{icon}</div>
           <div>
             <div style={{ color: "#fff", fontWeight: 700, fontSize: 13.5 }}>{data.nume}</div>
-            <div style={{ color: "rgba(255,255,255,0.78)", fontSize: 11 }}>{job}</div>
+            <div style={{ color: "rgba(255,255,255,0.78)", fontSize: 11 }}>{roleCopy.job}</div>
           </div>
         </div>
-        <div style={{ position: "absolute", top: 10, right: 10, background: "rgba(255,255,255,0.2)", borderRadius: 6, padding: "2px 7px", fontSize: 10, color: "#fff", fontWeight: 700 }}>Starter</div>
+        <div style={{ position: "absolute", top: 10, right: 10, background: "rgba(255,255,255,0.2)", borderRadius: 6, padding: "2px 7px", fontSize: 10, color: "#fff", fontWeight: 700 }}>{copy.common.starter}</div>
       </div>
       <div style={{ padding: "13px 17px 17px" }}>
-        <h3 style={{ margin: "0 0 5px", fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{data.titlu}</h3>
-        <p style={{ margin: "0 0 10px", fontSize: 11.5, color: "#64748b", lineHeight: 1.5 }}>{data.despre.slice(0, 96)}...</p>
+        <h3 style={{ margin: "0 0 5px", fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{roleCopy.title}</h3>
+        <p style={{ margin: "0 0 10px", fontSize: 11.5, color: "#64748b", lineHeight: 1.5 }}>{roleCopy.summary.slice(0, 96)}...</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 12 }}>
-          {data.competente.slice(0, 3).map((competence, index) => <span key={index} style={{ padding: "2px 7px", background: `${color}14`, color, borderRadius: 20, fontSize: 10.5, fontWeight: 600 }}>{competence.split(" ")[0]}</span>)}
+          {roleCopy.chips.map((competence, index) => <span key={index} style={{ padding: "2px 7px", background: `${color}14`, color, borderRadius: 20, fontSize: 10.5, fontWeight: 600 }}>{competence}</span>)}
         </div>
         <button onClick={() => onSelect(profile)} style={{ width: "100%", padding: "9px", borderRadius: 9, background: hov ? color : "#f8fafc", color: hov ? "#fff" : "#374151", border: `1.5px solid ${hov ? color : "#e2e8f0"}`, cursor: "pointer", fontWeight: 700, fontSize: 12.5, transition: "all 0.18s" }}>
-          {hov ? "Folosește rolul" : "Alege rolul →"}
+          {hov ? copy.roleCard.useRole : copy.roleCard.chooseRole}
         </button>
       </div>
     </div>
   );
 }
 
-function CustomRoleCard({ roleName, onSelect }) {
+function CustomRoleCard({ roleName, onSelect, lang }) {
+  const copy = getCopy(lang);
+
   return (
     <button onClick={() => onSelect(roleName)} style={{ width: "100%", textAlign: "left", background: "linear-gradient(135deg,#0f172a,#1e293b)", borderRadius: 16, border: "1.5px solid #0f172a", padding: 20, cursor: "pointer", color: "#fff", boxShadow: "0 18px 40px rgba(15,23,42,0.18)" }}>
       <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.12)", borderRadius: 999, padding: "4px 10px", fontSize: 11, fontWeight: 700, marginBottom: 14 }}>
-        <span>Custom role</span>
+        <span>{copy.customRoleCard.badge}</span>
       </div>
       <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.4px", marginBottom: 8 }}>
-        Creează CV pentru &quot;{roleName}&quot;
+        {copy.customRoleCard.createFor} &quot;{roleName}&quot;
       </div>
       <p style={{ margin: "0 0 16px", fontSize: 13, color: "rgba(255,255,255,0.78)", lineHeight: 1.6 }}>
-        Păstrăm cele 18 designuri și îți deschidem un CV curat, gata de completat pentru jobul tău.
+        {copy.customRoleCard.subtitle}
       </p>
       <div style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700 }}>
-        <span>Continuă către designuri</span>
+        <span>{copy.customRoleCard.continue}</span>
         <span>→</span>
       </div>
     </button>
   );
 }
 
-function DesignCard({ design, onSelect }) {
+function DesignCard({ design, onSelect, lang }) {
+  const copy = getCopy(lang);
   const [hov, setHov] = useState(false);
   const preview = design.previewData || {};
   const theme = getDesignTheme(design);
@@ -1219,6 +1253,8 @@ function DesignCard({ design, onSelect }) {
   const isSingleColumn = theme.singleColumn;
   const previewColumns = isSingleColumn ? "1fr" : theme.sidebarFirst ? "72px 1fr" : "1fr 72px";
   const previewSidebarFirst = theme.sidebarFirst && !isSingleColumn;
+  const previewRole = getStarterRoleName(design.previewStarterId, design.previewRole, lang);
+  const previewLabels = theme.skillMode === "chips" ? copy.designCard.previewProfile : copy.designCard.previewSections;
 
   return (
     <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
@@ -1230,10 +1266,10 @@ function DesignCard({ design, onSelect }) {
             <div style={{ width: 42, height: 42, borderRadius: photoRadius, background: theme.headerTextColor === "#ffffff" ? "rgba(255,255,255,0.16)" : `${design.color}14`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}>{design.icon}</div>
             <div>
               <div style={{ fontWeight: 800, fontSize: 14 }}>{design.name}</div>
-              <div style={{ fontSize: 11, color: theme.headerSecondaryColor }}>{getDesignVariantLabel(design.variant)}</div>
+              <div style={{ fontSize: 11, color: theme.headerSecondaryColor }}>{getDesignVariantLabel(design.variant, lang)}</div>
             </div>
           </div>
-          <span style={{ borderRadius: 999, background: theme.headerTextColor === "#ffffff" ? "rgba(255,255,255,0.16)" : `${design.color}14`, padding: "3px 8px", fontSize: 10.5, fontWeight: 700, position: "relative", zIndex: 1 }}>18 opțiuni</span>
+          <span style={{ borderRadius: 999, background: theme.headerTextColor === "#ffffff" ? "rgba(255,255,255,0.16)" : `${design.color}14`, padding: "3px 8px", fontSize: 10.5, fontWeight: 700, position: "relative", zIndex: 1 }}>{copy.designCard.optionsCount}</span>
         </div>
         <div style={{ marginTop: 14, background: theme.documentBackground, borderRadius: 14, padding: "10px 12px", position: "relative", zIndex: 1, border: `1px solid ${design.color}18`, color: "#0f172a" }}>
           <div style={{ display: "grid", gridTemplateColumns: previewColumns, minHeight: 86, overflow: "hidden", borderRadius: 10 }}>
@@ -1242,10 +1278,10 @@ function DesignCard({ design, onSelect }) {
               {["100%", "78%", "66%"].map((width, index) => <div key={index} style={{ height: 4, width, background: `${design.color}${index === 0 ? "55" : "22"}`, borderRadius: 999, marginBottom: 6 }} />)}
             </div>}
             <div style={{ padding: "8px 10px", background: theme.documentBackground }}>
-              <div style={{ fontSize: 11.5, fontWeight: 800, color: "#0f172a" }}>{preview.nume || "Prenume Nume"}</div>
-              <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>{design.previewRole}</div>
+              <div style={{ fontSize: 11.5, fontWeight: 800, color: "#0f172a" }}>{preview.nume || copy.designCard.previewName}</div>
+              <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>{previewRole}</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 9 }}>
-                {(theme.skillMode === "chips" ? ["Profil", "Skills"] : ["Exp", "Educație"]).map((label) => (
+                {previewLabels.map((label) => (
                   <span key={label} style={{ padding: "2px 6px", background: theme.skillMode === "chips" ? `${design.color}14` : "#f1f5f9", color: theme.skillMode === "chips" ? design.color : "#64748b", borderRadius: theme.sectionMode === "boxed" ? 6 : 999, fontSize: 9.5, fontWeight: 700 }}>
                     {label}
                   </span>
@@ -1263,15 +1299,35 @@ function DesignCard({ design, onSelect }) {
         </div>
       </div>
       <div style={{ padding: "14px 17px 17px" }}>
-        <p style={{ margin: "0 0 10px", fontSize: 12.5, color: "#475569", lineHeight: 1.6 }}>{design.tagline}</p>
+        <p style={{ margin: "0 0 10px", fontSize: 12.5, color: "#475569", lineHeight: 1.6 }}>{getLocalizedDesignTagline(design, lang)}</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-          <span style={{ padding: "3px 8px", background: `${design.color}12`, color: design.color, borderRadius: 999, fontSize: 10.5, fontWeight: 700 }}>{getDesignVariantLabel(design.variant)}</span>
-          <span style={{ padding: "3px 8px", background: "#f8fafc", color: "#64748b", borderRadius: 999, fontSize: 10.5, fontWeight: 700 }}>{preview.titlu?.split(" / ")[0] || "Preview"}</span>
+          <span style={{ padding: "3px 8px", background: `${design.color}12`, color: design.color, borderRadius: 999, fontSize: 10.5, fontWeight: 700 }}>{getDesignVariantLabel(design.variant, lang)}</span>
+          <span style={{ padding: "3px 8px", background: "#f8fafc", color: "#64748b", borderRadius: 999, fontSize: 10.5, fontWeight: 700 }}>{previewRole || copy.designCard.previewFallback}</span>
         </div>
         <button onClick={() => onSelect(design)} style={{ width: "100%", padding: "10px", borderRadius: 10, background: hov ? design.color : "#f8fafc", color: hov ? "#fff" : "#374151", border: `1.5px solid ${hov ? design.color : "#e2e8f0"}`, cursor: "pointer", fontWeight: 700, fontSize: 12.5, transition: "all 0.18s" }}>
-          {hov ? "Alege designul" : "Previzualizează designul →"}
+          {hov ? copy.designCard.choose : copy.designCard.preview}
         </button>
       </div>
+    </div>
+  );
+}
+
+function LanguageSwitch({ lang, onChange }) {
+  const copy = getCopy(lang);
+
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: 4, background: "#f8fafc", border: "1.5px solid #e2e8f0", borderRadius: 999 }}>
+      {["en", "ro"].map((option) => (
+        <button
+          key={option}
+          type="button"
+          onClick={() => onChange(option)}
+          aria-label={`${copy.common.languageToggle} ${option.toUpperCase()}`}
+          style={{ padding: "6px 10px", borderRadius: 999, border: "none", background: lang === option ? "#1a56db" : "transparent", color: lang === option ? "#fff" : "#475569", cursor: lang === option ? "default" : "pointer", fontWeight: 800, fontSize: 11.5, minWidth: 38 }}
+        >
+          {option.toUpperCase()}
+        </button>
+      ))}
     </div>
   );
 }
@@ -1280,6 +1336,8 @@ function DesignCard({ design, onSelect }) {
 const fBtn = { width: "100%", padding: "9px 14px", borderRadius: 9, cursor: "pointer", fontWeight: 600, fontSize: 12.5, textAlign: "center", boxSizing: "border-box" };
 
 export default function App() {
+  const [lang, setLang] = useState("en");
+  const copy = getCopy(lang);
   const {
     paymentInfo,
     checking,
@@ -1290,12 +1348,11 @@ export default function App() {
     verifyPayment,
     startingCheckout,
     warmCheckout,
-  } = useStripePayment();
+  } = useStripePayment(lang);
   const [tmpl, setTmpl] = useState(null);
   const [selectedRole, setSelectedRole] = useState(null);
   const [roleSeedData, setRoleSeedData] = useState(null);
   const [cvRO, setCvRO] = useState(null);
-  const lang = "ro";
   const [photo, setPhoto] = useState(null);
   const [currentDocumentHash, setCurrentDocumentHash] = useState(null);
   const [search, setSearch] = useState("");
@@ -1306,9 +1363,17 @@ export default function App() {
   const [showPaywall, setShowPaywall] = useState(false);
   const [mobileView, setMobileView] = useState("cv");
   const fileRef = useRef();
+  const prepareCheckoutRef = useRef(prepareCheckout);
+
+  useEffect(() => {
+    prepareCheckoutRef.current = prepareCheckout;
+  }, [prepareCheckout]);
 
   const cvData = cvRO;
   const setCvData = setCvRO;
+  const selectedStarterProfile = selectedRole?.starterId
+    ? cvTemplates.find((template) => template.id === selectedRole.starterId)
+    : null;
   const paidForCurrentDocument = Boolean(
     paymentInfo && currentDocumentHash && paymentInfo.documentHash === currentDocumentHash
   );
@@ -1318,26 +1383,58 @@ export default function App() {
     preparedCheckoutHash &&
     preparedCheckoutHash === currentDocumentHash
   );
-  const selectedRoleName = selectedRole?.name || cvData?.titlu || "Rolul tău";
+  const selectedRoleName = selectedStarterProfile
+    ? getStarterRoleName(selectedRole.starterId, selectedStarterProfile.job, lang)
+    : selectedRole?.name || cvData?.titlu || copy.common.yourRole;
   const normalizedSearch = search.trim().toLowerCase();
-  const filteredRoles = cvTemplates.filter(template =>
-    template.job.toLowerCase().includes(normalizedSearch) ||
-    template.data.titlu.toLowerCase().includes(normalizedSearch)
-  );
-  const hasExactStarter = cvTemplates.some(template =>
-    template.job.toLowerCase() === normalizedSearch ||
-    template.data.titlu.toLowerCase() === normalizedSearch
-  );
+  const filteredRoles = cvTemplates.filter(template => {
+    const roleCopy = getStarterRoleCopy(template, lang);
+    return [
+      template.job,
+      template.data.titlu,
+      roleCopy.job,
+      roleCopy.title,
+    ].some((value) => value?.toLowerCase().includes(normalizedSearch));
+  });
+  const hasExactStarter = cvTemplates.some(template => {
+    const roleCopy = getStarterRoleCopy(template, lang);
+    return [
+      template.job,
+      template.data.titlu,
+      roleCopy.job,
+      roleCopy.title,
+    ].some((value) => value?.toLowerCase() === normalizedSearch);
+  });
   const showCustomRoleCard = normalizedSearch.length > 1 && !hasExactStarter;
 
-  const handleRoleSelection = ({ name, source, seedData }) => {
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlLang = params.get("lang");
+    const savedLang = localStorage.getItem(UI_LANGUAGE_STORAGE_KEY);
+    const nextLang = normalizeUiLang(urlLang || savedLang || "en");
+    setLang(nextLang);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+
+    try {
+      localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, lang);
+    } catch (error) {
+      console.error("Could not persist UI language", error);
+    }
+
+    syncLanguageInUrl(lang);
+  }, [lang]);
+
+  const handleRoleSelection = ({ name, source, seedData, starterId = null }) => {
     const normalizedRole = normalizeString(name, 160);
 
     if (!normalizedRole) {
       return;
     }
 
-    setSelectedRole({ name: normalizedRole, source });
+    setSelectedRole({ name: normalizedRole, source, starterId });
     setRoleSeedData(cloneData(seedData));
     setTmpl(null);
     setCvRO(null);
@@ -1350,9 +1447,12 @@ export default function App() {
   };
 
   const selectStarterRole = (profile) => {
+    const roleCopy = getStarterRoleCopy(profile, lang);
+
     handleRoleSelection({
-      name: profile.job,
+      name: roleCopy.job,
       source: "starter",
+      starterId: profile.id,
       seedData: profile.data,
     });
   };
@@ -1379,7 +1479,7 @@ export default function App() {
     if (!preserveCurrent) {
       const nextSeed =
         roleSeedData ||
-        createEmptyCvData(selectedRole?.name || design.previewRole || "Rolul tău");
+        createEmptyCvData(selectedRole?.name || design.previewRole || copy.common.yourRole);
       setCvRO(cloneData(nextSeed));
       setPhoto(null);
       setEditMode(selectedRole?.source === "custom");
@@ -1430,24 +1530,31 @@ export default function App() {
       return;
     }
 
+    const restoredLang = normalizeUiLang(pendingPurchase.lang || "en");
+
     const restoredTemplate =
       designCatalog.find(template => template.id === pendingPurchase.designId || template.key === pendingPurchase.designKey) ||
       {
         id: pendingPurchase.designId || 0,
         key: pendingPurchase.designKey || "restored-design",
-        name: pendingPurchase.designName || "Design restaurat",
+        name: pendingPurchase.designName || (restoredLang === "en" ? "Restored design" : "Design restaurat"),
         variant: "classic",
         color: pendingPurchase.color || "#1a56db",
         icon: "📄",
-        tagline: "Design restaurat din sesiunea de plată",
+        tagline: restoredLang === "en" ? "Restored from the payment session" : "Design restaurat din sesiunea de plată",
         previewData: pendingPurchase.cvData,
-        previewRole: pendingPurchase.roleName || pendingPurchase.cvData?.titlu || "Rol",
+        previewRole: pendingPurchase.roleName || pendingPurchase.cvData?.titlu || (restoredLang === "en" ? "Role" : "Rol"),
       };
+
+    if (pendingPurchase.lang) {
+      setLang(restoredLang);
+    }
 
     setTmpl(restoredTemplate);
     setSelectedRole({
-      name: pendingPurchase.roleName || pendingPurchase.cvData?.titlu || "Rolul tău",
+      name: pendingPurchase.roleName || pendingPurchase.cvData?.titlu || (restoredLang === "en" ? "Your role" : "Rolul tău"),
       source: pendingPurchase.roleSource || "restored",
+      starterId: pendingPurchase.roleStarterId || null,
     });
     setRoleSeedData(cloneData(pendingPurchase.cvData));
     setCvRO(cloneData(pendingPurchase.cvData));
@@ -1463,7 +1570,7 @@ export default function App() {
       return;
     }
 
-    prepareCheckout({
+    prepareCheckoutRef.current({
       templateName: tmpl.key,
       lang,
       documentHash: currentDocumentHash,
@@ -1477,7 +1584,7 @@ export default function App() {
     if (!file) return;
 
     if (!["image/png", "image/jpeg"].includes(file.type)) {
-      alert("Te rog încarcă o fotografie PNG sau JPEG.");
+      alert(copy.errors.invalidPhotoType);
       e.target.value = "";
       return;
     }
@@ -1489,7 +1596,7 @@ export default function App() {
       }
     };
     reader.onerror = () => {
-      alert("Nu am putut citi fotografia selectată.");
+      alert(copy.errors.photoRead);
     };
     reader.readAsDataURL(file);
   };
@@ -1540,7 +1647,7 @@ export default function App() {
 
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || "Eroare la generarea PDF-ului.");
+        throw new Error(payload.error || copy.errors.pdfGeneration);
       }
 
       const blob = await response.blob();
@@ -1558,7 +1665,7 @@ export default function App() {
       clearPendingPurchase();
     } catch (error) {
       console.error(error);
-      alert(error.message || "Eroare la generarea PDF-ului.");
+      alert(error.message || copy.errors.pdfGeneration);
     } finally {
       setExporting(false);
     }
@@ -1594,6 +1701,7 @@ export default function App() {
         designName: tmpl.name,
         roleName: selectedRoleName,
         roleSource: selectedRole?.source || "custom",
+        roleStarterId: selectedRole?.starterId || null,
         color: tmpl.color,
         lang,
         cvData,
@@ -1609,7 +1717,7 @@ export default function App() {
       });
     } catch (error) {
       console.error(error);
-      alert(error.message || "Nu s-a putut pregăti plata.");
+      alert(error.message || copy.errors.paymentPrepare);
     }
   };
 
@@ -1639,8 +1747,8 @@ export default function App() {
         <div style={{ background: "linear-gradient(90deg, #059669, #0d9488)", padding: "10px 20px", textAlign: "center" }}>
           <span style={{ fontSize: 14, color: "#fff", fontWeight: 700 }}>
             {paidForCurrentDocument
-              ? "🎉 Plată confirmată! Poți descărca PDF-ul securizat pentru documentul salvat."
-              : "🎉 Plata este confirmată, dar PDF-ul se deblochează doar pentru versiunea CV-ului pe care ai achitat-o."}
+              ? copy.banners.paymentConfirmed
+              : copy.banners.paymentLocked}
           </span>
         </div>
       )}
@@ -1648,7 +1756,7 @@ export default function App() {
       {/* ── CHECKING PAYMENT ── */}
       {checking && (
         <div style={{ background: "#fef9c3", padding: "10px 20px", textAlign: "center" }}>
-          <span style={{ fontSize: 13, color: "#854d0e", fontWeight: 600 }}>⏳ Se verifică plata...</span>
+          <span style={{ fontSize: 13, color: "#854d0e", fontWeight: 600 }}>{copy.banners.checkingPayment}</span>
         </div>
       )}
 
@@ -1665,11 +1773,14 @@ export default function App() {
             </div>
           </div>
 
-          {page === "editor" && tmpl && cvData && (
-            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-              <button onClick={() => setPage("designs")} style={nb("#e2e8f0","#fff","#374151")}>← Designuri</button>
-              <button onClick={() => setPage("role")} style={nb("#fde68a","#fffbeb","#92400e")}>↺ Job</button>
-              <button onClick={() => fileRef.current.click()} style={nb("#bae6fd","#f0f9ff","#0369a1")}>{photo ? "🔄 Foto" : "📷 Foto"}</button>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <LanguageSwitch lang={lang} onChange={setLang} />
+
+            {page === "editor" && tmpl && cvData && (
+              <>
+              <button onClick={() => setPage("designs")} style={nb("#e2e8f0","#fff","#374151")}>{copy.header.backDesigns}</button>
+              <button onClick={() => setPage("role")} style={nb("#fde68a","#fffbeb","#92400e")}>{copy.header.backJob}</button>
+              <button onClick={() => fileRef.current.click()} style={nb("#bae6fd","#f0f9ff","#0369a1")}>{photo ? copy.header.changePhotoShort : copy.header.addPhotoShort}</button>
 
               {/* Mobile switch in header */}
               <div className="mobile-only" style={{ display: "none" }}>
@@ -1678,13 +1789,13 @@ export default function App() {
                     onClick={() => setMobileView("cv")}
                     style={{ padding: "6px 10px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: mobileView === "cv" ? "#1a56db" : "#fff", color: mobileView === "cv" ? "#fff" : "#374151", fontWeight: 700, fontSize: 11 }}
                   >
-                    Vezi CV
+                    {copy.common.viewCv}
                   </button>
                   <button
                     onClick={() => setMobileView("panel")}
                     style={{ padding: "6px 10px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: mobileView === "panel" ? "#1a56db" : "#fff", color: mobileView === "panel" ? "#fff" : "#374151", fontWeight: 700, fontSize: 11 }}
                   >
-                    Editează
+                    {copy.common.editPanel}
                   </button>
                 </div>
               </div>
@@ -1696,15 +1807,16 @@ export default function App() {
               </div>
 
               <button onClick={() => setEditMode(e => !e)} style={nb(editMode ? "#fcd34d" : "#e2e8f0", editMode ? "#fffbeb" : "#fff", editMode ? "#92400e" : "#374151", 700)}>
-                {editMode ? "👁 Preview" : "✏️ Editează"}
+                {editMode ? copy.header.preview : copy.header.edit}
               </button>
-              {editMode && <button onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 2000); }} style={nb(saved ? "#059669" : "#bbf7d0", saved ? "#059669" : "#f0fdf4", saved ? "#fff" : "#059669", 700)}>{saved ? "✓ Salvat!" : "💾 Salvează"}</button>}
+              {editMode && <button onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 2000); }} style={nb(saved ? "#059669" : "#bbf7d0", saved ? "#059669" : "#f0fdf4", saved ? "#fff" : "#059669", 700)}>{saved ? copy.header.saved : copy.header.save}</button>}
               <button onClick={handleDownloadClick} disabled={exporting || startingCheckout}
                 style={{ padding: "7px 16px", borderRadius: 8, background: paidForCurrentDocument ? "linear-gradient(135deg,#059669,#0d9488)" : exporting || startingCheckout ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", cursor: exporting || startingCheckout ? "not-allowed" : "pointer", fontWeight: 800, fontSize: 12.5, boxShadow: exporting || startingCheckout ? "none" : `0 3px 10px ${tmpl.color}44` }}>
-                {exporting ? "⏳..." : startingCheckout ? "⏳ Stripe..." : paidForCurrentDocument ? "⬇️ PDF Securizat ✓" : "🔒 PDF RO — 19 RON"}
+                {exporting ? copy.header.pdfLoading : startingCheckout ? copy.header.stripeLoading : paidForCurrentDocument ? copy.header.pdfPaid : copy.header.pdfLocked}
               </button>
-            </div>
-          )}
+              </>
+            )}
+          </div>
           <input ref={fileRef} type="file" accept="image/png,image/jpeg" style={{ display: "none" }} onChange={onPhoto} />
         </div>
       </header>
@@ -1713,7 +1825,7 @@ export default function App() {
       {page === "editor" && editMode && (
         <div style={{ background: "#fef9c3", borderBottom: "1.5px solid #fde047", padding: "7px 20px", textAlign: "center" }}>
           <span style={{ fontSize: 13, color: "#854d0e", fontWeight: 600 }}>
-            ✏️ Mod editare — Click pe orice câmp din CV pentru a-l modifica live
+            {copy.banners.editMode}
           </span>
         </div>
       )}
@@ -1722,33 +1834,33 @@ export default function App() {
       {page === "role" && (
         <div style={{ maxWidth: 1260, margin: "0 auto", padding: "34px 20px" }}>
           <div style={{ textAlign: "center", marginBottom: 40 }}>
-            <div style={{ display: "inline-block", background: "linear-gradient(135deg,#eff6ff,#faf5ff)", border: "1px solid #c7d2fe", borderRadius: 20, padding: "4px 14px", fontSize: 12, color: "#4338ca", fontWeight: 600, marginBottom: 12 }}>✦ Orice job · 18 designuri · RO</div>
+            <div style={{ display: "inline-block", background: "linear-gradient(135deg,#eff6ff,#faf5ff)", border: "1px solid #c7d2fe", borderRadius: 20, padding: "4px 14px", fontSize: 12, color: "#4338ca", fontWeight: 600, marginBottom: 12 }}>{copy.rolePage.pill}</div>
             <h1 style={{ fontSize: 38, fontWeight: 900, color: "#0f172a", margin: "0 0 10px", letterSpacing: "-1px", lineHeight: 1.2 }}>
-              Scrie jobul tău<br />
-              <span style={{ background: "linear-gradient(135deg,#1a56db,#7c3aed)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>în 3 Minute</span>
+              {copy.rolePage.titleLead}<br />
+              <span style={{ background: "linear-gradient(135deg,#1a56db,#7c3aed)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{copy.rolePage.titleAccent}</span>
             </h1>
             <p style={{ fontSize: 15.5, color: "#64748b", margin: "0 auto 24px", maxWidth: 500, lineHeight: 1.65 }}>
-              Alegi rolul sau îl scrii din search, apoi îți alegi unul dintre cele 18 designuri.
+              {copy.rolePage.subtitle}
             </p>
             <div style={{ display: "flex", justifyContent: "center", gap: 36, marginBottom: 32 }}>
-              {[["18","Designuri"],["🔎","Rol liber"],["PDF","Export Real"]].map(([v,l]) => (
-                <div key={l} style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: 21, fontWeight: 800, color: "#1a56db" }}>{v}</div>
-                  <div style={{ fontSize: 11.5, color: "#94a3b8" }}>{l}</div>
+              {copy.rolePage.stats.map((stat) => (
+                <div key={stat.label} style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 21, fontWeight: 800, color: "#1a56db" }}>{stat.value}</div>
+                  <div style={{ fontSize: 11.5, color: "#94a3b8" }}>{stat.label}</div>
                 </div>
               ))}
             </div>
             <div style={{ maxWidth: 390, margin: "0 auto", position: "relative" }}>
               <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#94a3b8", fontSize: 15 }}>🔍</span>
-              <input type="text" placeholder="Scrie jobul tău: casier, electrician, barista..." value={search} onChange={e => setSearch(e.target.value)}
+              <input type="text" placeholder={copy.rolePage.searchPlaceholder} value={search} onChange={e => setSearch(e.target.value)}
                 style={{ width: "100%", padding: "10px 14px 10px 36px", borderRadius: 11, border: "1.5px solid #e2e8f0", fontSize: 13.5, outline: "none", boxSizing: "border-box", background: "#fff", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }} />
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(288px, 1fr))", gap: 16 }}>
-            {showCustomRoleCard && <CustomRoleCard roleName={search.trim()} onSelect={selectCustomRole} />}
-            {filteredRoles.map(role => <RoleCard key={role.id} profile={role} onSelect={selectStarterRole} />)}
+            {showCustomRoleCard && <CustomRoleCard roleName={search.trim()} onSelect={selectCustomRole} lang={lang} />}
+            {filteredRoles.map(role => <RoleCard key={role.id} profile={role} onSelect={selectStarterRole} lang={lang} />)}
           </div>
-          {!filteredRoles.length && !showCustomRoleCard && <div style={{ textAlign: "center", padding: "52px 0", color: "#94a3b8" }}><div style={{ fontSize: 40 }}>🔍</div><p>Nu s-au găsit roluri starter pentru &quot;{search}&quot;</p></div>}
+          {!filteredRoles.length && !showCustomRoleCard && <div style={{ textAlign: "center", padding: "52px 0", color: "#94a3b8" }}><div style={{ fontSize: 40 }}>🔍</div><p>{copy.rolePage.noResults} &quot;{search}&quot;</p></div>}
         </div>
       )}
 
@@ -1756,22 +1868,22 @@ export default function App() {
         <div style={{ maxWidth: 1260, margin: "0 auto", padding: "34px 20px" }}>
           <div style={{ textAlign: "center", marginBottom: 34 }}>
             <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "linear-gradient(135deg,#ecfeff,#eef2ff)", border: "1px solid #bfdbfe", borderRadius: 999, padding: "5px 14px", fontSize: 12, color: "#1d4ed8", fontWeight: 700, marginBottom: 14 }}>
-              <span>Rol selectat</span>
+              <span>{copy.designsPage.selectedRole}</span>
               <span>{selectedRoleName}</span>
             </div>
             <h2 style={{ fontSize: 34, fontWeight: 900, color: "#0f172a", margin: "0 0 10px", letterSpacing: "-0.8px" }}>
-              Alege unul dintre cele 18 designuri
+              {copy.designsPage.title}
             </h2>
             <p style={{ margin: "0 auto 20px", maxWidth: 640, fontSize: 15.5, color: "#64748b", lineHeight: 1.65 }}>
-              Conținutul rămâne legat de rolul tău, iar aici schimbi doar stilul vizual: layout, ritm, accent și personalitate.
+              {copy.designsPage.subtitle}
             </p>
             <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
-              <button onClick={() => setPage("role")} style={nb("#e2e8f0", "#fff", "#374151", 700)}>← Schimbă jobul</button>
-              {selectedRole?.source === "custom" && <span style={{ display: "inline-flex", alignItems: "center", padding: "6px 10px", borderRadius: 999, background: "#fff7ed", border: "1px solid #fdba74", color: "#9a3412", fontSize: 11.5, fontWeight: 700 }}>Rol custom</span>}
+              <button onClick={() => setPage("role")} style={nb("#e2e8f0", "#fff", "#374151", 700)}>{copy.designsPage.changeJob}</button>
+              {selectedRole?.source === "custom" && <span style={{ display: "inline-flex", alignItems: "center", padding: "6px 10px", borderRadius: 999, background: "#fff7ed", border: "1px solid #fdba74", color: "#9a3412", fontSize: 11.5, fontWeight: 700 }}>{copy.designsPage.customRoleBadge}</span>}
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(288px, 1fr))", gap: 16 }}>
-            {designCatalog.map(design => <DesignCard key={design.id} design={design} onSelect={selected => selectDesign(selected, { preserveCurrent: false })} />)}
+            {designCatalog.map(design => <DesignCard key={design.id} design={design} onSelect={selected => selectDesign(selected, { preserveCurrent: false })} lang={lang} />)}
           </div>
         </div>
       )}
@@ -1786,13 +1898,13 @@ export default function App() {
                 onClick={() => setMobileView("cv")}
                 style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: mobileView === "cv" ? "#1a56db" : "#fff", color: mobileView === "cv" ? "#fff" : "#374151", fontWeight: 700, fontSize: 12 }}
               >
-                Vezi CV
+                {copy.common.viewCv}
               </button>
               <button
                 onClick={() => setMobileView("panel")}
                 style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1.5px solid #e2e8f0", background: mobileView === "panel" ? "#1a56db" : "#fff", color: mobileView === "panel" ? "#fff" : "#374151", fontWeight: 700, fontSize: 12 }}
               >
-                Editează
+                {copy.common.editPanel}
               </button>
             </div>
           </div>
@@ -1810,23 +1922,23 @@ export default function App() {
                 <span style={{ fontSize: 22 }}>{tmpl.icon}</span>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>{tmpl.name}</div>
-                  <div style={{ fontSize: 11, color: "#94a3b8" }}>{selectedRoleName} · {getDesignVariantLabel(tmpl.variant)} · 🇷🇴</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8" }}>{selectedRoleName} · {getDesignVariantLabel(tmpl.variant, lang)} · {copy.common.langBadge}</div>
                 </div>
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <button onClick={() => fileRef.current.click()} style={{ ...fBtn, background: photo ? "#f0fdf4" : "#f0f9ff", color: photo ? "#059669" : "#0369a1", border: `1.5px solid ${photo ? "#bbf7d0" : "#bae6fd"}` }}>
-                  {photo ? "✓ Fotografie adăugată" : "📷 Adaugă fotografia ta"}
+                  {photo ? copy.editor.photoAdded : copy.editor.addPhoto}
                 </button>
-                {photo && <div style={{ textAlign: "center" }}><Image src={photo} alt="previzualizare fotografie" width={52} height={52} unoptimized style={{ width: 52, height: 52, borderRadius: "50%", objectFit: "cover", border: `3px solid ${tmpl.color}` }} /></div>}
+                {photo && <div style={{ textAlign: "center" }}><Image src={photo} alt={copy.editor.photoPreviewAlt} width={52} height={52} unoptimized style={{ width: 52, height: 52, borderRadius: "50%", objectFit: "cover", border: `3px solid ${tmpl.color}` }} /></div>}
 
                 <button onClick={() => setEditMode(e => !e)} style={{ ...fBtn, background: editMode ? "#fffbeb" : "#f8fafc", color: editMode ? "#b45309" : "#374151", border: `1.5px solid ${editMode ? "#fcd34d" : "#e2e8f0"}`, fontWeight: 700 }}>
-                  {editMode ? "👁 Ieși din editare" : "✏️ Editează CV-ul"}
+                  {editMode ? copy.editor.exitEdit : copy.editor.editCv}
                 </button>
 
                 <button onClick={handleDownloadClick} disabled={exporting || startingCheckout}
                   style={{ ...fBtn, padding: "12px", background: paidForCurrentDocument ? "linear-gradient(135deg,#059669,#0d9488)" : exporting || startingCheckout ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", fontWeight: 800, fontSize: 14, cursor: exporting || startingCheckout ? "not-allowed" : "pointer", boxShadow: exporting || startingCheckout ? "none" : `0 4px 14px ${tmpl.color}44` }}>
-                  {exporting ? "⏳ Generare PDF..." : startingCheckout ? "⏳ Se conectează la Stripe..." : paidForCurrentDocument ? "⬇️ Descarcă PDF securizat ✓" : "🔒 Descarcă PDF — 19 RON"}
+                  {exporting ? copy.editor.generatingPdf : startingCheckout ? copy.editor.connectingStripe : paidForCurrentDocument ? copy.editor.downloadPaid : copy.editor.downloadLocked}
                 </button>
               </div>
             </div>
@@ -1835,9 +1947,9 @@ export default function App() {
             {editMode && (
               <div style={{ background: "#fff", border: "1.5px solid #e8ecf4", borderRadius: 14, padding: 16 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 12 }}>
-                  Date de Contact {lang === "en" ? "🇬🇧" : "🇷🇴"}
+                  {copy.editor.contactDetails} {copy.common.langBadge}
                 </div>
-                {[["Nume","nume"],["Titlu profesional","titlu"],["Email","email"],["Telefon","telefon"],["Oraș","oras"],["LinkedIn","linkedin"]].map(([label, key]) => (
+                {Object.entries(copy.editor.contactFields).map(([key, label]) => (
                   <div key={key} style={{ marginBottom: 9 }}>
                     <label style={{ display: "block", fontSize: 10.5, color: "#94a3b8", fontWeight: 700, marginBottom: 3, textTransform: "uppercase" }}>{label}</label>
                     <input type="text" value={cvData[key] || ""} onChange={e => setCvData(p => ({ ...p, [key]: e.target.value }))}
@@ -1849,18 +1961,18 @@ export default function App() {
 
             {/* Other templates */}
             <div style={{ background: "#fff", border: "1.5px solid #e8ecf4", borderRadius: 14, padding: 15 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 11 }}>Alte Designuri</div>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 11 }}>{copy.editor.otherDesigns}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                 {designCatalog.filter(t => t.id !== tmpl.id).slice(0, 4).map(t => (
                   <button key={t.id} onClick={() => selectDesign(t, { preserveCurrent: true })} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #f1f5f9", background: "#fafbfc", cursor: "pointer", textAlign: "left" }}>
                     <div style={{ width: 28, height: 28, borderRadius: 7, background: `${t.color}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{t.icon}</div>
                     <div>
                       <div style={{ fontSize: 12.5, fontWeight: 600, color: "#0f172a" }}>{t.name}</div>
-                      <div style={{ fontSize: 10.5, color: "#94a3b8" }}>{getDesignVariantLabel(t.variant)}</div>
+                      <div style={{ fontSize: 10.5, color: "#94a3b8" }}>{getDesignVariantLabel(t.variant, lang)}</div>
                     </div>
                   </button>
                 ))}
-                <button onClick={() => setPage("designs")} style={{ padding: "7px 10px", borderRadius: 8, border: "1.5px dashed #cbd5e1", background: "transparent", cursor: "pointer", color: "#64748b", fontSize: 12 }}>+ Toate cele 18 designuri</button>
+                <button onClick={() => setPage("designs")} style={{ padding: "7px 10px", borderRadius: 8, border: "1.5px dashed #cbd5e1", background: "transparent", cursor: "pointer", color: "#64748b", fontSize: 12 }}>{copy.editor.allDesigns}</button>
               </div>
             </div>
           </div>
@@ -1873,11 +1985,11 @@ export default function App() {
             GDPR
           </Link>
           <span style={{ color: "#cbd5e1" }}>•</span>
-          <Link href="/politica-confidentialitate" style={{ fontSize: 12.5, color: "#475569", fontWeight: 600, textDecoration: "none" }}>
-            Politica de confidențialitate
+          <Link href="/privacy-policy" style={{ fontSize: 12.5, color: "#475569", fontWeight: 600, textDecoration: "none" }}>
+            {copy.footer.privacy}
           </Link>
         </div>
-        <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>© {new Date().getFullYear()} CVPerfect.online · Orice job · 18 designuri · Export PDF · ATS Optimizat</p>
+        <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>© {new Date().getFullYear()} CVPerfect.online · {copy.footer.tagline}</p>
       </footer>
     </div>
   );
