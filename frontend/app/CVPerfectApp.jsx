@@ -8,6 +8,7 @@ import {
   getLocalizedDesignTagline,
   getLocalizedVariantLabel,
   getStarterRoleCopy,
+  getStarterRoleData,
   getStarterRoleName,
   normalizeUiLang,
   UI_LANGUAGE_STORAGE_KEY,
@@ -1194,6 +1195,7 @@ function RoleCard({ profile, onSelect, lang }) {
   const [hov, setHov] = useState(false);
   const { data, color, icon } = profile;
   const roleCopy = getStarterRoleCopy(profile, lang);
+  const starterData = getStarterRoleData(profile.id, data, lang);
 
   return (
     <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
@@ -1202,7 +1204,7 @@ function RoleCard({ profile, onSelect, lang }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 42, height: 42, borderRadius: "50%", background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}>{icon}</div>
           <div>
-            <div style={{ color: "#fff", fontWeight: 700, fontSize: 13.5 }}>{data.nume}</div>
+            <div style={{ color: "#fff", fontWeight: 700, fontSize: 13.5 }}>{starterData.nume}</div>
             <div style={{ color: "rgba(255,255,255,0.78)", fontSize: 11 }}>{roleCopy.job}</div>
           </div>
         </div>
@@ -1247,7 +1249,7 @@ function CustomRoleCard({ roleName, onSelect, lang }) {
 function DesignCard({ design, onSelect, lang }) {
   const copy = getCopy(lang);
   const [hov, setHov] = useState(false);
-  const preview = design.previewData || {};
+  const preview = getStarterRoleData(design.previewStarterId, design.previewData, lang) || {};
   const theme = getDesignTheme(design);
   const photoRadius = getPhotoRadius(theme.photoShape);
   const isSingleColumn = theme.singleColumn;
@@ -1408,6 +1410,35 @@ export default function App() {
   const showCustomRoleCard = normalizedSearch.length > 1 && !hasExactStarter;
 
   useEffect(() => {
+    if (selectedRole?.source !== "starter" || !selectedStarterProfile || !roleSeedData) {
+      return;
+    }
+
+    const roSeed = selectedStarterProfile.data;
+    const enSeed = getStarterRoleData(selectedStarterProfile.id, selectedStarterProfile.data, "en");
+    const currentSeedSerialized = stableSerialize(roleSeedData);
+    const roSeedSerialized = stableSerialize(roSeed);
+    const enSeedSerialized = stableSerialize(enSeed);
+
+    if (currentSeedSerialized !== roSeedSerialized && currentSeedSerialized !== enSeedSerialized) {
+      return;
+    }
+
+    const nextSeed = getStarterRoleData(selectedStarterProfile.id, selectedStarterProfile.data, lang);
+    const nextSeedSerialized = stableSerialize(nextSeed);
+
+    if (currentSeedSerialized === nextSeedSerialized) {
+      return;
+    }
+
+    setRoleSeedData(cloneData(nextSeed));
+
+    if (cvRO && stableSerialize(cvRO) === currentSeedSerialized) {
+      setCvRO(cloneData(nextSeed));
+    }
+  }, [lang, roleSeedData, cvRO, selectedRole?.source, selectedStarterProfile]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlLang = params.get("lang");
     const savedLang = localStorage.getItem(UI_LANGUAGE_STORAGE_KEY);
@@ -1448,12 +1479,13 @@ export default function App() {
 
   const selectStarterRole = (profile) => {
     const roleCopy = getStarterRoleCopy(profile, lang);
+    const starterSeedData = getStarterRoleData(profile.id, profile.data, lang);
 
     handleRoleSelection({
       name: roleCopy.job,
       source: "starter",
       starterId: profile.id,
-      seedData: profile.data,
+      seedData: starterSeedData,
     });
   };
 

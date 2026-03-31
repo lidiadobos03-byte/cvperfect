@@ -1,3 +1,5 @@
+import { STARTER_ROLE_SEED_EN } from "./starterSeedData";
+
 export const UI_LANGUAGE_STORAGE_KEY = "cvperfect.uiLang";
 
 export function normalizeUiLang(value) {
@@ -429,28 +431,39 @@ export function getStarterRoleTitle(starterId, fallbackTitle, lang) {
     return fallbackTitle;
   }
 
-  return STARTER_ROLE_EN[starterId]?.title || fallbackTitle;
+  return STARTER_ROLE_SEED_EN[starterId]?.titlu || STARTER_ROLE_EN[starterId]?.title || fallbackTitle;
+}
+
+export function getStarterRoleData(starterId, fallbackData, lang) {
+  if (normalizeUiLang(lang) !== "en") {
+    return fallbackData;
+  }
+
+  return STARTER_ROLE_SEED_EN[starterId] || fallbackData;
 }
 
 export function getStarterRoleCopy(profile, lang) {
   const normalizedLang = normalizeUiLang(lang);
+  const starterData = getStarterRoleData(profile.id, profile.data, normalizedLang);
 
   if (normalizedLang !== "en") {
     return {
       job: profile.job,
-      title: profile.data.titlu,
-      summary: profile.data.despre,
-      chips: profile.data.competente.slice(0, 3).map((entry) => entry.split(" ")[0]),
+      title: starterData.titlu,
+      summary: starterData.despre,
+      chips: starterData.competente.slice(0, 3).map((entry) => entry.split(" ")[0]),
     };
   }
 
   const job = getStarterRoleName(profile.id, profile.job, normalizedLang);
-  const title = getStarterRoleTitle(profile.id, profile.data.titlu, normalizedLang);
+  const title = getStarterRoleTitle(profile.id, starterData.titlu, normalizedLang);
 
   return {
     job,
     title,
-    summary: getDefaultSummary(job, normalizedLang),
-    chips: getEnglishChips(title),
+    summary: starterData.despre || getDefaultSummary(job, normalizedLang),
+    chips: starterData.competente?.length
+      ? starterData.competente.slice(0, 3).map((entry) => entry.split(" ")[0])
+      : getEnglishChips(title),
   };
 }
