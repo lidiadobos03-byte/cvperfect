@@ -9,7 +9,6 @@ import {
   sanitizeFilename,
   verifyDownloadToken,
 } from "./utils/downloadAuth.js";
-import { generatePdf } from "./utils/pdf.js";
 
 dotenv.config();
 
@@ -77,7 +76,6 @@ app.post("/create-checkout", async (req, res) => {
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      payment_method_types: ["card"],
       line_items: [
         {
           price_data: {
@@ -193,6 +191,7 @@ app.post("/download-pdf", async (req, res) => {
       });
     }
 
+    const { generatePdf } = await import("./utils/pdf.js");
     const pdfBuffer = await generatePdf({
       templateName,
       color,

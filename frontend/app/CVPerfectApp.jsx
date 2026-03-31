@@ -138,8 +138,31 @@ function useStripePayment() {
   const [paymentInfo, setPaymentInfo] = useState(null);
   const [checking, setChecking] = useState(false);
   const [startingCheckout, setStartingCheckout] = useState(false);
+  const [preparingCheckout, setPreparingCheckout] = useState(false);
+  const [preparedCheckoutHash, setPreparedCheckoutHash] = useState(null);
   const warmupPromiseRef = useRef(null);
   const lastWarmupAtRef = useRef(0);
+  const preparedCheckoutRef = useRef(null);
+  const preparePromiseRef = useRef(null);
+
+  const fetchCheckoutUrl = async ({ templateName, lang, documentHash }) => {
+    const res = await fetch(`${API_URL}/create-checkout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ templateName, lang, documentHash })
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(data.error || "Eroare la inițierea plății.");
+    }
+
+    if (!data.url) {
+      throw new Error("Eroare la inițierea plății. Încearcă din nou.");
+    }
+
+    return data.url;
+  };
 
   const warmCheckout = async () => {
     const now = Date.now();
@@ -165,6 +188,43 @@ function useStripePayment() {
       });
 
     return warmupPromiseRef.current;
+  };
+
+  const prepareCheckout = async ({ templateName, lang, documentHash }) => {
+    const preparedCheckout = preparedCheckoutRef.current;
+
+    if (preparedCheckout?.documentHash === documentHash && preparedCheckout.url) {
+      return preparedCheckout.url;
+    }
+
+    const inFlightPreparation = preparePromiseRef.current;
+
+    if (inFlightPreparation?.documentHash === documentHash) {
+      return inFlightPreparation.promise;
+    }
+
+    const promise = (async () => {
+      setPreparingCheckout(true);
+      setPreparedCheckoutHash(null);
+
+      try {
+        await warmCheckout();
+        const url = await fetchCheckoutUrl({ templateName, lang, documentHash });
+        preparedCheckoutRef.current = { documentHash, url };
+        setPreparedCheckoutHash(documentHash);
+        return url;
+      } finally {
+        setPreparingCheckout(false);
+      }
+    })();
+
+    preparePromiseRef.current = { documentHash, promise };
+
+    return promise.finally(() => {
+      if (preparePromiseRef.current?.promise === promise) {
+        preparePromiseRef.current = null;
+      }
+    });
   };
 
   const verifyPayment = async (sessionId) => {
@@ -214,28 +274,46 @@ function useStripePayment() {
     }
   }, []);
 
+  useEffect(() => {
+    const scheduleWarmup = () => {
+      if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(() => {
+          void warmCheckout();
+        }, { timeout: 2500 });
+        return;
+      }
+
+      window.setTimeout(() => {
+        void warmCheckout();
+      }, 1200);
+    };
+
+    scheduleWarmup();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void warmCheckout();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
   const startPayment = async ({ templateName, lang, documentHash }) => {
     setStartingCheckout(true);
 
     try {
-      await warmCheckout();
+      const preparedCheckout = preparedCheckoutRef.current;
+      const checkoutUrl =
+        preparedCheckout?.documentHash === documentHash
+          ? preparedCheckout.url
+          : await prepareCheckout({ templateName, lang, documentHash });
 
-      const res = await fetch(`${API_URL}/create-checkout`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ templateName, lang, documentHash })
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Eroare la inițierea plății.");
-      }
-
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        alert("Eroare la inițierea plății. Încearcă din nou.");
-      }
+      window.location.href = checkoutUrl;
     } catch (e) {
       console.error(e);
       alert(e.message || "Nu s-a putut conecta la server. Verifică conexiunea.");
@@ -244,12 +322,28 @@ function useStripePayment() {
     }
   };
 
-  return { paymentInfo, checking, startPayment, verifyPayment, startingCheckout, warmCheckout };
+  return {
+    paymentInfo,
+    checking,
+    prepareCheckout,
+    preparedCheckoutHash,
+    preparingCheckout,
+    startPayment,
+    verifyPayment,
+    startingCheckout,
+    warmCheckout,
+  };
 }
 
 // ─── PAYWALL MODAL ────────────────────────────────────────────────────────────
-function PaywallModal({ onClose, onPay, templateName, lang, color, isPaying }) {
+function PaywallModal({ onClose, onPay, templateName, lang, color, isPaying, isPreparingCheckout, checkoutReady }) {
   const langLabel = lang === "en" ? "English" : "Română 🇷🇴";
+  const paymentButtonLabel = isPaying
+    ? "⏳ Se deschide Stripe..."
+    : isPreparingCheckout && !checkoutReady
+      ? "⏳ Pregătim plata..."
+      : "💳 Plătește 19 RON & Descarcă";
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.7)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ background: "#fff", borderRadius: 20, padding: 32, maxWidth: 420, width: "100%", boxShadow: "0 24px 64px rgba(0,0,0,0.25)", position: "relative" }}>
@@ -287,12 +381,14 @@ function PaywallModal({ onClose, onPay, templateName, lang, color, isPaying }) {
         {/* Pay button */}
         <button onClick={onPay} disabled={isPaying}
           style={{ width: "100%", padding: "14px", borderRadius: 12, background: isPaying ? "#94a3b8" : `linear-gradient(135deg, ${color}, #7c3aed)`, color: "#fff", border: "none", cursor: isPaying ? "wait" : "pointer", fontWeight: 800, fontSize: 16, boxShadow: isPaying ? "none" : `0 6px 20px ${color}50`, marginBottom: 12 }}>
-          {isPaying ? "⏳ Se conectează la Stripe..." : "💳 Plătește 19 RON & Descarcă"}
+          {paymentButtonLabel}
         </button>
 
-        {isPaying && (
+        {(isPaying || isPreparingCheckout) && (
           <p style={{ margin: "0 0 12px", fontSize: 12, color: "#64748b", textAlign: "center", lineHeight: 1.5 }}>
-            Prima deschidere poate dura puțin dacă backend-ul se trezește din standby.
+            {checkoutReady && !isPaying
+              ? "Conexiunea de plată este pregătită. Poți continua imediat."
+              : "Prima deschidere poate dura puțin dacă backend-ul se trezește din standby."}
           </p>
         )}
 
@@ -1184,7 +1280,17 @@ function DesignCard({ design, onSelect }) {
 const fBtn = { width: "100%", padding: "9px 14px", borderRadius: 9, cursor: "pointer", fontWeight: 600, fontSize: 12.5, textAlign: "center", boxSizing: "border-box" };
 
 export default function App() {
-  const { paymentInfo, checking, startPayment, verifyPayment, startingCheckout, warmCheckout } = useStripePayment();
+  const {
+    paymentInfo,
+    checking,
+    prepareCheckout,
+    preparedCheckoutHash,
+    preparingCheckout,
+    startPayment,
+    verifyPayment,
+    startingCheckout,
+    warmCheckout,
+  } = useStripePayment();
   const [tmpl, setTmpl] = useState(null);
   const [selectedRole, setSelectedRole] = useState(null);
   const [roleSeedData, setRoleSeedData] = useState(null);
@@ -1205,6 +1311,12 @@ export default function App() {
   const setCvData = setCvRO;
   const paidForCurrentDocument = Boolean(
     paymentInfo && currentDocumentHash && paymentInfo.documentHash === currentDocumentHash
+  );
+  const checkoutReady = Boolean(
+    showPaywall &&
+    currentDocumentHash &&
+    preparedCheckoutHash &&
+    preparedCheckoutHash === currentDocumentHash
   );
   const selectedRoleName = selectedRole?.name || cvData?.titlu || "Rolul tău";
   const normalizedSearch = search.trim().toLowerCase();
@@ -1345,6 +1457,20 @@ export default function App() {
     setMobileView("cv");
     window.scrollTo({ top: 0 });
   }, [paymentInfo]);
+
+  useEffect(() => {
+    if (!showPaywall || !tmpl || !cvData || !currentDocumentHash) {
+      return;
+    }
+
+    prepareCheckout({
+      templateName: tmpl.key,
+      lang,
+      documentHash: currentDocumentHash,
+    }).catch(error => {
+      console.error("Checkout preparation failed", error);
+    });
+  }, [showPaywall, tmpl, cvData, currentDocumentHash, lang]);
 
   const onPhoto = (e) => {
     const file = e.target.files?.[0];
@@ -1503,6 +1629,8 @@ export default function App() {
           lang={lang}
           color={tmpl.color}
           isPaying={startingCheckout}
+          isPreparingCheckout={preparingCheckout}
+          checkoutReady={checkoutReady}
         />
       )}
 
