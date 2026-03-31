@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://cvperfect-backend.onrender.com";
@@ -1738,8 +1739,17 @@ export default function App() {
         </div>
       )}
 
-      <footer style={{ borderTop: "1px solid #e8ecf4", background: "#fff", padding: "18px 20px", textAlign: "center", marginTop: 36 }}>
-        <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>© 2025 CVPerfect.online · Orice job · 18 designuri · Export PDF · ATS Optimizat</p>
+      <footer style={{ borderTop: "1px solid #e8ecf4", background: "#fff", padding: "20px", textAlign: "center", marginTop: 36 }}>
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
+          <Link href="/gdpr" style={{ fontSize: 12.5, color: "#475569", fontWeight: 600, textDecoration: "none" }}>
+            GDPR
+          </Link>
+          <span style={{ color: "#cbd5e1" }}>•</span>
+          <Link href="/politica-confidentialitate" style={{ fontSize: 12.5, color: "#475569", fontWeight: 600, textDecoration: "none" }}>
+            Politica de confidențialitate
+          </Link>
+        </div>
+        <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>© {new Date().getFullYear()} CVPerfect.online · Orice job · 18 designuri · Export PDF · ATS Optimizat</p>
       </footer>
     </div>
   );
