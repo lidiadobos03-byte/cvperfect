@@ -13,6 +13,8 @@ import {
 dotenv.config();
 
 const app = express();
+const getFrontendUrl = () =>
+  (process.env.FRONTEND_URL || "https://cvperfect.online").replace(/\/+$/, "");
 
 app.use(cors());
 
@@ -64,7 +66,7 @@ app.use(express.json({ limit: "10mb" }));
 app.post("/create-checkout", async (req, res) => {
   try {
     const stripe = getStripeClient();
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    const frontendUrl = getFrontendUrl();
     const documentHash = req.body?.documentHash;
 
     if (

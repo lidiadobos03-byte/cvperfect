@@ -1,10 +1,13 @@
 import { Request, Response } from "express";
 import { getStripeClient } from "../utils/stripe.js";
 
+const getFrontendUrl = () =>
+  (process.env.FRONTEND_URL || "https://cvperfect.online").replace(/\/+$/, "");
+
 export const createCheckoutSession = async (req: Request, res: Response) => {
   try {
     const stripe = getStripeClient();
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    const frontendUrl = getFrontendUrl();
     const templateName =
       typeof req.body?.templateName === "string" ? req.body.templateName : "CV";
     const lang = typeof req.body?.lang === "string" ? req.body.lang : "ro";
