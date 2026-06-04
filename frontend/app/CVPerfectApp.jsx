@@ -1366,6 +1366,8 @@ export default function App() {
   const [mobileView, setMobileView] = useState("cv");
   const fileRef = useRef();
   const prepareCheckoutRef = useRef(prepareCheckout);
+  const downloadPaidPdfRef = useRef(null);
+  const autoDownloadAttemptRef = useRef(null);
 
   useEffect(() => {
     prepareCheckoutRef.current = prepareCheckout;
@@ -1702,6 +1704,31 @@ export default function App() {
       setExporting(false);
     }
   };
+
+  downloadPaidPdfRef.current = downloadPaidPdf;
+
+  useEffect(() => {
+    if (!paymentInfo?.downloadToken || !tmpl || !cvData || !currentDocumentHash) {
+      return;
+    }
+
+    if (currentDocumentHash !== paymentInfo.documentHash) {
+      return;
+    }
+
+    const pendingPurchase = loadPendingPurchase();
+    if (!pendingPurchase || pendingPurchase.documentHash !== paymentInfo.documentHash) {
+      return;
+    }
+
+    const attemptKey = `${paymentInfo.sessionId || "session"}:${paymentInfo.documentHash}`;
+    if (autoDownloadAttemptRef.current === attemptKey) {
+      return;
+    }
+
+    autoDownloadAttemptRef.current = attemptKey;
+    void downloadPaidPdfRef.current?.(paymentInfo);
+  }, [paymentInfo, tmpl, cvData, currentDocumentHash]);
 
   const handleDownloadClick = async () => {
     if (paymentInfo) {
