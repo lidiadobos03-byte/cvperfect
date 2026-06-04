@@ -185,11 +185,11 @@ function useStripePayment(lang) {
   const preparePromiseRef = useRef(null);
   const verifyPaymentRef = useRef(null);
 
-  const fetchCheckoutUrl = async ({ templateName, lang, documentHash }) => {
+  const fetchCheckoutUrl = async ({ templateName, lang, documentHash, color, cvData, photoDataUrl }) => {
     const res = await fetch(`${API_URL}/create-checkout`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ templateName, lang, documentHash })
+      body: JSON.stringify({ templateName, lang, documentHash, color, cvData, photoDataUrl })
     });
     const data = await res.json().catch(() => ({}));
 
@@ -230,7 +230,7 @@ function useStripePayment(lang) {
     return warmupPromiseRef.current;
   };
 
-  const prepareCheckout = async ({ templateName, lang, documentHash }) => {
+  const prepareCheckout = async ({ templateName, lang, documentHash, color, cvData, photoDataUrl }) => {
     const preparedCheckout = preparedCheckoutRef.current;
 
     if (preparedCheckout?.documentHash === documentHash && preparedCheckout.url) {
@@ -249,7 +249,7 @@ function useStripePayment(lang) {
 
       try {
         await warmCheckout();
-        const url = await fetchCheckoutUrl({ templateName, lang, documentHash });
+        const url = await fetchCheckoutUrl({ templateName, lang, documentHash, color, cvData, photoDataUrl });
         preparedCheckoutRef.current = { documentHash, url };
         setPreparedCheckoutHash(documentHash);
         return url;
@@ -345,7 +345,7 @@ function useStripePayment(lang) {
     };
   }, []);
 
-  const startPayment = async ({ templateName, lang, documentHash }) => {
+  const startPayment = async ({ templateName, lang, documentHash, color, cvData, photoDataUrl }) => {
     setStartingCheckout(true);
 
     try {
@@ -353,7 +353,7 @@ function useStripePayment(lang) {
       const checkoutUrl =
         preparedCheckout?.documentHash === documentHash
           ? preparedCheckout.url
-          : await prepareCheckout({ templateName, lang, documentHash });
+          : await prepareCheckout({ templateName, lang, documentHash, color, cvData, photoDataUrl });
 
       window.location.href = checkoutUrl;
     } catch (e) {
@@ -1367,6 +1367,7 @@ export default function App() {
   const fileRef = useRef();
   const prepareCheckoutRef = useRef(prepareCheckout);
   const downloadPaidPdfRef = useRef(null);
+  const downloadStoredPaidPdfRef = useRef(null);
   const autoDownloadAttemptRef = useRef(null);
 
   useEffect(() => {
@@ -1608,10 +1609,13 @@ export default function App() {
       templateName: tmpl.key,
       lang,
       documentHash: currentDocumentHash,
+      color: tmpl.color,
+      cvData,
+      photoDataUrl: photo,
     }).catch(error => {
       console.error("Checkout preparation failed", error);
     });
-  }, [showPaywall, tmpl, cvData, currentDocumentHash, lang]);
+  }, [showPaywall, tmpl, cvData, currentDocumentHash, lang, photo]);
 
   const onPhoto = (e) => {
     const file = e.target.files?.[0];
@@ -1635,9 +1639,57 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
+  const downloadStoredPaidPdf = async (activePayment = paymentInfo) => {
+    if (!activePayment?.downloadToken) {
+      return false;
+    }
+
+    try {
+      setExporting(true);
+
+      const response = await fetch(`${API_URL}/download-session-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          downloadToken: activePayment.downloadToken,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || copy.errors.pdfGeneration);
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition");
+      const fallbackFilename = `CV_${lang.toUpperCase()}.pdf`;
+      const filename = parseFilenameFromDisposition(disposition) || fallbackFilename;
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      clearPendingPurchase();
+      return true;
+    } catch (error) {
+      console.error(error);
+      return false;
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  downloadStoredPaidPdfRef.current = downloadStoredPaidPdf;
+
   const downloadPaidPdf = async (activePayment = paymentInfo, allowRefresh = true) => {
     if (!activePayment || !tmpl || !cvData) {
-      setShowPaywall(true);
+      const downloaded = await downloadStoredPaidPdf(activePayment);
+      if (!downloaded) {
+        setShowPaywall(true);
+      }
       return;
     }
 
@@ -1708,16 +1760,27 @@ export default function App() {
   downloadPaidPdfRef.current = downloadPaidPdf;
 
   useEffect(() => {
-    if (!paymentInfo?.downloadToken || !tmpl || !cvData || !currentDocumentHash) {
-      return;
-    }
-
-    if (currentDocumentHash !== paymentInfo.documentHash) {
+    if (!paymentInfo?.downloadToken) {
       return;
     }
 
     const pendingPurchase = loadPendingPurchase();
     if (!pendingPurchase || pendingPurchase.documentHash !== paymentInfo.documentHash) {
+      const attemptKey = `${paymentInfo.sessionId || "session"}:${paymentInfo.documentHash}:stored`;
+      if (autoDownloadAttemptRef.current === attemptKey) {
+        return;
+      }
+
+      autoDownloadAttemptRef.current = attemptKey;
+      void downloadStoredPaidPdfRef.current?.(paymentInfo);
+      return;
+    }
+
+    if (!tmpl || !cvData || !currentDocumentHash) {
+      return;
+    }
+
+    if (currentDocumentHash !== paymentInfo.documentHash) {
       return;
     }
 
@@ -1773,6 +1836,9 @@ export default function App() {
         templateName: tmpl.key,
         lang,
         documentHash,
+        color: tmpl.color,
+        cvData,
+        photoDataUrl: photo,
       });
     } catch (error) {
       console.error(error);
