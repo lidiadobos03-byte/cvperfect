@@ -47,6 +47,8 @@ STRIPE_WEBHOOK_SECRET  = whsec_SECRETUL_TAU
 DOWNLOAD_TOKEN_SECRET  = o-cheie-lunga-random-pentru-download
 RESEND_API_KEY         = re_CHEIA_TA_RESEND
 EMAIL_FROM             = CVPerfect <hello@domeniul-tau.ro>
+SUPABASE_URL           = https://PROJECT_ID.supabase.co
+SUPABASE_SERVICE_ROLE_KEY = cheia service_role din Supabase
 FRONTEND_URL           = https://cvperfect.online
 PORT                   = 4000
 ```
@@ -68,7 +70,18 @@ După deploy, Render îți dă un URL de forma:
 În Render, la frontend, setează variabila:
 ```bash
 NEXT_PUBLIC_API_URL=https://cvperfect-backend.onrender.com
+NEXT_PUBLIC_SUPABASE_URL=https://PROJECT_ID.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=cheia anon public din Supabase
 ```
+
+Pentru conturi, CV-uri salvate și istoric:
+1. Creează un proiect în **supabase.com**
+2. Mergi la **SQL Editor**
+3. Rulează conținutul din `supabase/schema.sql`
+4. În **Authentication → URL Configuration**, setează:
+   - Site URL: `https://cvperfect.online`
+   - Redirect URLs: `https://cvperfect.online/**`
+5. Copiază cheile din **Project Settings → API** în Render.
 
 ---
 

@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
 import {
   getCopy,
   getLocalizedDesignTagline,
@@ -16,6 +17,12 @@ import {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://cvperfect-backend.onrender.com";
 const PENDING_PURCHASE_STORAGE_KEY = "cvperfect.pendingPurchase";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const supabase =
+  SUPABASE_URL && SUPABASE_ANON_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
 
 function syncLanguageInUrl(lang, options = {}) {
   const { removePaymentParams = false } = options;
@@ -185,11 +192,14 @@ function useStripePayment(lang) {
   const preparePromiseRef = useRef(null);
   const verifyPaymentRef = useRef(null);
 
-  const fetchCheckoutUrl = async ({ templateName, lang, documentHash, color, cvData, photoDataUrl }) => {
+  const fetchCheckoutUrl = async ({ templateName, lang, documentHash, color, cvData, photoDataUrl, authToken, resumeId }) => {
     const res = await fetch(`${API_URL}/create-checkout`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ templateName, lang, documentHash, color, cvData, photoDataUrl })
+      headers: {
+        "Content-Type": "application/json",
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: JSON.stringify({ templateName, lang, documentHash, color, cvData, photoDataUrl, resumeId })
     });
     const data = await res.json().catch(() => ({}));
 
@@ -230,27 +240,28 @@ function useStripePayment(lang) {
     return warmupPromiseRef.current;
   };
 
-  const prepareCheckout = async ({ templateName, lang, documentHash, color, cvData, photoDataUrl }) => {
+  const prepareCheckout = async ({ templateName, lang, documentHash, color, cvData, photoDataUrl, authToken, accountUserId, resumeId }) => {
     const preparedCheckout = preparedCheckoutRef.current;
+    const accountKey = `${accountUserId || "anonymous"}:${resumeId || "unsaved"}`;
 
-    if (preparedCheckout?.documentHash === documentHash && preparedCheckout.url) {
+    if (preparedCheckout?.documentHash === documentHash && preparedCheckout.accountKey === accountKey && preparedCheckout.url) {
       return preparedCheckout.url;
     }
 
     const inFlightPreparation = preparePromiseRef.current;
 
-    if (inFlightPreparation?.documentHash === documentHash) {
+    if (inFlightPreparation?.documentHash === documentHash && inFlightPreparation.accountKey === accountKey) {
       return inFlightPreparation.promise;
     }
 
     const promise = (async () => {
-      setPreparingCheckout(true);
-      setPreparedCheckoutHash(null);
+        setPreparingCheckout(true);
+        setPreparedCheckoutHash(null);
 
       try {
         await warmCheckout();
-        const url = await fetchCheckoutUrl({ templateName, lang, documentHash, color, cvData, photoDataUrl });
-        preparedCheckoutRef.current = { documentHash, url };
+        const url = await fetchCheckoutUrl({ templateName, lang, documentHash, color, cvData, photoDataUrl, authToken, resumeId });
+        preparedCheckoutRef.current = { documentHash, accountKey, url };
         setPreparedCheckoutHash(documentHash);
         return url;
       } finally {
@@ -258,7 +269,7 @@ function useStripePayment(lang) {
       }
     })();
 
-    preparePromiseRef.current = { documentHash, promise };
+    preparePromiseRef.current = { documentHash, accountKey, promise };
 
     return promise.finally(() => {
       if (preparePromiseRef.current?.promise === promise) {
@@ -345,15 +356,16 @@ function useStripePayment(lang) {
     };
   }, []);
 
-  const startPayment = async ({ templateName, lang, documentHash, color, cvData, photoDataUrl }) => {
+  const startPayment = async ({ templateName, lang, documentHash, color, cvData, photoDataUrl, authToken, accountUserId, resumeId }) => {
     setStartingCheckout(true);
 
     try {
       const preparedCheckout = preparedCheckoutRef.current;
+      const accountKey = `${accountUserId || "anonymous"}:${resumeId || "unsaved"}`;
       const checkoutUrl =
-        preparedCheckout?.documentHash === documentHash
+        preparedCheckout?.documentHash === documentHash && preparedCheckout.accountKey === accountKey
           ? preparedCheckout.url
-          : await prepareCheckout({ templateName, lang, documentHash, color, cvData, photoDataUrl });
+          : await prepareCheckout({ templateName, lang, documentHash, color, cvData, photoDataUrl, authToken, accountUserId, resumeId });
 
       window.location.href = checkoutUrl;
     } catch (e) {
@@ -1334,6 +1346,120 @@ function LanguageSwitch({ lang, onChange }) {
   );
 }
 
+function AccountModal({
+  lang,
+  user,
+  authEmail,
+  setAuthEmail,
+  onClose,
+  onLogin,
+  onLogout,
+  onSaveResume,
+  onOpenResume,
+  onDownloadPurchase,
+  resumes,
+  purchases,
+  loading,
+  saving,
+  message,
+  configured,
+}) {
+  const copy = getCopy(lang);
+  const accountCopy = copy.account;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.58)", zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "#fff", width: "100%", maxWidth: 620, maxHeight: "88vh", overflow: "auto", borderRadius: 18, boxShadow: "0 28px 70px rgba(15,23,42,0.25)", border: "1px solid #e2e8f0" }}>
+        <div style={{ padding: "18px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 850, color: "#0f172a" }}>{accountCopy.title}</div>
+            <div style={{ fontSize: 12.5, color: "#64748b", marginTop: 3 }}>{user?.email || accountCopy.subtitle}</div>
+          </div>
+          <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: 999, border: "1px solid #e2e8f0", background: "#f8fafc", cursor: "pointer", fontWeight: 800 }}>×</button>
+        </div>
+
+        {!configured && (
+          <div style={{ margin: 18, padding: 14, borderRadius: 12, background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", fontSize: 13, lineHeight: 1.5 }}>
+            {accountCopy.notConfigured}
+          </div>
+        )}
+
+        {message && (
+          <div style={{ margin: "18px 18px 0", padding: 12, borderRadius: 12, background: "#ecfeff", border: "1px solid #a5f3fc", color: "#155e75", fontSize: 13, fontWeight: 650 }}>
+            {message}
+          </div>
+        )}
+
+        {!user ? (
+          <div style={{ padding: 18 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 800, color: "#64748b", textTransform: "uppercase", marginBottom: 6 }}>
+              {accountCopy.emailLabel}
+            </label>
+            <input
+              type="email"
+              value={authEmail}
+              onChange={event => setAuthEmail(event.target.value)}
+              placeholder={accountCopy.emailPlaceholder}
+              disabled={!configured || loading}
+              style={{ width: "100%", boxSizing: "border-box", padding: "11px 12px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14, outline: "none", marginBottom: 10 }}
+            />
+            <button onClick={onLogin} disabled={!configured || loading || !authEmail.trim()} style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: loading || !authEmail.trim() ? "#94a3b8" : "linear-gradient(135deg,#1a56db,#7c3aed)", color: "#fff", cursor: loading ? "wait" : "pointer", fontWeight: 850 }}>
+              {loading ? accountCopy.sendingLink : accountCopy.sendLink}
+            </button>
+            <p style={{ margin: "10px 0 0", fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>{accountCopy.loginHint}</p>
+          </div>
+        ) : (
+          <div style={{ padding: 18, display: "grid", gap: 16 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={onSaveResume} disabled={saving} style={nb("#bbf7d0", saving ? "#dcfce7" : "#f0fdf4", "#047857", 800)}>
+                {saving ? accountCopy.saving : accountCopy.saveCurrent}
+              </button>
+              <button onClick={onLogout} style={nb("#fecaca", "#fff1f2", "#be123c", 750)}>
+                {accountCopy.logout}
+              </button>
+            </div>
+
+            <section>
+              <h3 style={{ margin: "0 0 8px", fontSize: 13, color: "#0f172a", textTransform: "uppercase", letterSpacing: 0.4 }}>{accountCopy.savedResumes}</h3>
+              <div style={{ display: "grid", gap: 8 }}>
+                {resumes.length ? resumes.map(resume => (
+                  <button key={resume.id} onClick={() => onOpenResume(resume)} style={{ textAlign: "left", padding: 12, borderRadius: 11, border: "1px solid #e2e8f0", background: "#f8fafc", cursor: "pointer" }}>
+                    <div style={{ fontWeight: 800, color: "#0f172a", fontSize: 13.5 }}>{resume.title || accountCopy.untitledResume}</div>
+                    <div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>{resume.design_name || resume.design_key} · {resume.lang?.toUpperCase?.() || "RO"}</div>
+                  </button>
+                )) : (
+                  <div style={{ padding: 12, borderRadius: 11, background: "#f8fafc", border: "1px dashed #cbd5e1", color: "#64748b", fontSize: 13 }}>{accountCopy.noResumes}</div>
+                )}
+              </div>
+            </section>
+
+            <section>
+              <h3 style={{ margin: "0 0 8px", fontSize: 13, color: "#0f172a", textTransform: "uppercase", letterSpacing: 0.4 }}>{accountCopy.purchaseHistory}</h3>
+              <div style={{ display: "grid", gap: 8 }}>
+                {purchases.length ? purchases.map(purchase => (
+                  <div key={purchase.id} style={{ padding: 12, borderRadius: 11, border: "1px solid #e2e8f0", background: "#fff", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontWeight: 800, color: "#0f172a", fontSize: 13.5 }}>{purchase.title || accountCopy.untitledResume}</div>
+                      <div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>
+                        {(purchase.amount_total ? `${(purchase.amount_total / 100).toFixed(0)} ${String(purchase.currency || "ron").toUpperCase()}` : "19 RON")} · {purchase.paid_at ? new Date(purchase.paid_at).toLocaleDateString(lang === "ro" ? "ro-RO" : "en-US") : accountCopy.paid}
+                      </div>
+                    </div>
+                    <button onClick={() => onDownloadPurchase(purchase)} style={nb("#bfdbfe", "#eff6ff", "#1d4ed8", 800)}>
+                      {accountCopy.downloadAgain}
+                    </button>
+                  </div>
+                )) : (
+                  <div style={{ padding: 12, borderRadius: 11, background: "#f8fafc", border: "1px dashed #cbd5e1", color: "#64748b", fontSize: 13 }}>{accountCopy.noPurchases}</div>
+                )}
+              </div>
+            </section>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 const fBtn = { width: "100%", padding: "9px 14px", borderRadius: 9, cursor: "pointer", fontWeight: 600, fontSize: 12.5, textAlign: "center", boxSizing: "border-box" };
 
@@ -1364,11 +1490,22 @@ export default function App() {
   const [saved, setSaved] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [mobileView, setMobileView] = useState("cv");
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [authUser, setAuthUser] = useState(null);
+  const [authSession, setAuthSession] = useState(null);
+  const [authEmail, setAuthEmail] = useState("");
+  const [accountLoading, setAccountLoading] = useState(false);
+  const [accountSaving, setAccountSaving] = useState(false);
+  const [accountMessage, setAccountMessage] = useState("");
+  const [savedResumes, setSavedResumes] = useState([]);
+  const [purchaseHistory, setPurchaseHistory] = useState([]);
+  const [activeResumeId, setActiveResumeId] = useState(null);
   const fileRef = useRef();
   const prepareCheckoutRef = useRef(prepareCheckout);
   const downloadPaidPdfRef = useRef(null);
   const downloadStoredPaidPdfRef = useRef(null);
   const autoDownloadAttemptRef = useRef(null);
+  const authToken = authSession?.access_token || null;
 
   useEffect(() => {
     prepareCheckoutRef.current = prepareCheckout;
@@ -1411,6 +1548,298 @@ export default function App() {
     ].some((value) => value?.toLowerCase() === normalizedSearch);
   });
   const showCustomRoleCard = normalizedSearch.length > 1 && !hasExactStarter;
+
+  const showAccountMessage = (message) => {
+    setAccountMessage(message);
+    window.setTimeout(() => setAccountMessage(""), 5000);
+  };
+
+  const getAuthAccessToken = async () => {
+    if (!supabase) return null;
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token || null;
+  };
+
+  const loadSavedResumes = async () => {
+    if (!supabase || !authUser) {
+      setSavedResumes([]);
+      return [];
+    }
+
+    const { data, error } = await supabase
+      .from("cv_resumes")
+      .select("*")
+      .eq("user_id", authUser.id)
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      showAccountMessage(copy.account.loadError);
+      return [];
+    }
+
+    setSavedResumes(data || []);
+    return data || [];
+  };
+
+  const loadPurchaseHistory = async () => {
+    const token = await getAuthAccessToken();
+
+    if (!token) {
+      setPurchaseHistory([]);
+      return [];
+    }
+
+    const response = await fetch(`${API_URL}/account/purchases`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      console.error(payload);
+      showAccountMessage(payload.error || copy.account.loadError);
+      return [];
+    }
+
+    setPurchaseHistory(payload.purchases || []);
+    return payload.purchases || [];
+  };
+
+  const refreshAccountData = async () => {
+    await Promise.all([loadSavedResumes(), loadPurchaseHistory()]);
+  };
+
+  const handleLogin = async () => {
+    if (!supabase) {
+      showAccountMessage(copy.account.notConfigured);
+      return;
+    }
+
+    const email = authEmail.trim();
+    if (!email) return;
+
+    setAccountLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: window.location.href,
+        },
+      });
+
+      if (error) throw error;
+      showAccountMessage(copy.account.linkSent);
+    } catch (error) {
+      console.error(error);
+      showAccountMessage(error.message || copy.account.loginError);
+    } finally {
+      setAccountLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setAuthUser(null);
+    setAuthSession(null);
+    setSavedResumes([]);
+    setPurchaseHistory([]);
+    setActiveResumeId(null);
+    showAccountMessage(copy.account.loggedOut);
+  };
+
+  const saveCurrentResume = async ({ silent = false } = {}) => {
+    if (!supabase) {
+      setAccountOpen(true);
+      showAccountMessage(copy.account.notConfigured);
+      return null;
+    }
+
+    if (!authUser) {
+      setAccountOpen(true);
+      showAccountMessage(copy.account.loginRequired);
+      return null;
+    }
+
+    if (!tmpl || !cvData) {
+      if (!silent) showAccountMessage(copy.account.nothingToSave);
+      return null;
+    }
+
+    setAccountSaving(true);
+
+    try {
+      const documentHash =
+        currentDocumentHash ||
+        await createDocumentHash({
+          templateName: tmpl.key,
+          color: tmpl.color,
+          lang,
+          cvData,
+          photoDataUrl: photo,
+        });
+      const title = normalizeString(cvData.nume || cvData.titlu || selectedRoleName || "CV", 160) || "CV";
+      const row = {
+        user_id: authUser.id,
+        title,
+        role_name: selectedRoleName,
+        role_source: selectedRole?.source || "custom",
+        role_starter_id: selectedRole?.starterId || null,
+        design_id: tmpl.id || null,
+        design_key: tmpl.key,
+        design_name: tmpl.name,
+        color: tmpl.color,
+        lang,
+        cv_data: cvData,
+        photo_data_url: photo || null,
+        document_hash: documentHash,
+        updated_at: new Date().toISOString(),
+      };
+
+      const query = activeResumeId
+        ? supabase
+            .from("cv_resumes")
+            .update(row)
+            .eq("id", activeResumeId)
+            .eq("user_id", authUser.id)
+            .select()
+            .single()
+        : supabase
+            .from("cv_resumes")
+            .insert(row)
+            .select()
+            .single();
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      setActiveResumeId(data.id);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2000);
+      await loadSavedResumes();
+      if (!silent) showAccountMessage(copy.account.saved);
+      return data;
+    } catch (error) {
+      console.error(error);
+      showAccountMessage(error.message || copy.account.saveError);
+      return null;
+    } finally {
+      setAccountSaving(false);
+    }
+  };
+
+  const openSavedResume = (resume) => {
+    const restoredLang = normalizeUiLang(resume.lang || lang);
+    const restoredDesign =
+      designCatalog.find(design => design.id === resume.design_id || design.key === resume.design_key) ||
+      {
+        id: resume.design_id || 0,
+        key: resume.design_key || "saved-design",
+        name: resume.design_name || (restoredLang === "en" ? "Saved design" : "Design salvat"),
+        variant: "classic",
+        color: resume.color || "#1a56db",
+        icon: "📄",
+        tagline: restoredLang === "en" ? "Saved in your account" : "Salvat în contul tău",
+        previewData: resume.cv_data,
+        previewRole: resume.role_name || resume.cv_data?.titlu || "CV",
+      };
+
+    setLang(restoredLang);
+    setTmpl(restoredDesign);
+    setSelectedRole({
+      name: resume.role_name || resume.cv_data?.titlu || copy.common.yourRole,
+      source: resume.role_source || "saved",
+      starterId: resume.role_starter_id || null,
+    });
+    setRoleSeedData(cloneData(resume.cv_data));
+    setCvRO(cloneData(resume.cv_data));
+    setPhoto(resume.photo_data_url || null);
+    setActiveResumeId(resume.id);
+    setEditMode(false);
+    setPage("editor");
+    setMobileView("cv");
+    setAccountOpen(false);
+    window.scrollTo({ top: 0 });
+  };
+
+  const downloadPurchasePdf = async (purchase) => {
+    const token = await getAuthAccessToken();
+    if (!token) {
+      showAccountMessage(copy.account.loginRequired);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/account/download-purchase-pdf`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ purchaseId: purchase.id }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || copy.errors.pdfGeneration);
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition");
+      const filename = parseFilenameFromDisposition(disposition) || `CV_${String(purchase.lang || lang).toUpperCase()}.pdf`;
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error(error);
+      showAccountMessage(error.message || copy.errors.pdfGeneration);
+    }
+  };
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setAuthSession(data.session || null);
+      setAuthUser(data.session?.user || null);
+      setAuthEmail(data.session?.user?.email || "");
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthSession(session || null);
+      setAuthUser(session?.user || null);
+      setAuthEmail(session?.user?.email || "");
+    });
+
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authUser) {
+      setSavedResumes([]);
+      setPurchaseHistory([]);
+      return;
+    }
+
+    void refreshAccountData();
+    // Account data is refreshed when the authenticated user changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser]);
 
   useEffect(() => {
     if (selectedRole?.source !== "starter" || !selectedStarterProfile || !roleSeedData) {
@@ -1474,6 +1903,7 @@ export default function App() {
     setCvRO(null);
     setPhoto(null);
     setCurrentDocumentHash(null);
+    setActiveResumeId(null);
     setEditMode(source === "custom");
     setPage("designs");
     setMobileView("cv");
@@ -1612,10 +2042,13 @@ export default function App() {
       color: tmpl.color,
       cvData,
       photoDataUrl: photo,
+      authToken,
+      accountUserId: authUser?.id || null,
+      resumeId: activeResumeId,
     }).catch(error => {
       console.error("Checkout preparation failed", error);
     });
-  }, [showPaywall, tmpl, cvData, currentDocumentHash, lang, photo]);
+  }, [showPaywall, tmpl, cvData, currentDocumentHash, lang, photo, authToken, authUser?.id, activeResumeId]);
 
   const onPhoto = (e) => {
     const file = e.target.files?.[0];
@@ -1807,6 +2240,13 @@ export default function App() {
     if (!tmpl || !cvData) return;
 
     try {
+      let resumeIdForCheckout = activeResumeId;
+
+      if (authUser && supabase) {
+        const savedResume = await saveCurrentResume({ silent: true });
+        resumeIdForCheckout = savedResume?.id || resumeIdForCheckout;
+      }
+
       const documentHash =
         currentDocumentHash ||
         await createDocumentHash({
@@ -1829,6 +2269,7 @@ export default function App() {
         cvData,
         photoDataUrl: photo,
         documentHash,
+        resumeId: resumeIdForCheckout || null,
         savedAt: Date.now(),
       });
 
@@ -1839,6 +2280,9 @@ export default function App() {
         color: tmpl.color,
         cvData,
         photoDataUrl: photo,
+        authToken,
+        accountUserId: authUser?.id || null,
+        resumeId: resumeIdForCheckout,
       });
     } catch (error) {
       console.error(error);
@@ -1864,6 +2308,27 @@ export default function App() {
           isPaying={startingCheckout}
           isPreparingCheckout={preparingCheckout}
           checkoutReady={checkoutReady}
+        />
+      )}
+
+      {accountOpen && (
+        <AccountModal
+          lang={lang}
+          user={authUser}
+          authEmail={authEmail}
+          setAuthEmail={setAuthEmail}
+          onClose={() => setAccountOpen(false)}
+          onLogin={handleLogin}
+          onLogout={handleLogout}
+          onSaveResume={() => saveCurrentResume()}
+          onOpenResume={openSavedResume}
+          onDownloadPurchase={downloadPurchasePdf}
+          resumes={savedResumes}
+          purchases={purchaseHistory}
+          loading={accountLoading}
+          saving={accountSaving}
+          message={accountMessage}
+          configured={Boolean(supabase)}
         />
       )}
 
@@ -1899,6 +2364,9 @@ export default function App() {
           </div>
 
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <button onClick={() => setAccountOpen(true)} style={nb(authUser ? "#bbf7d0" : "#bfdbfe", authUser ? "#f0fdf4" : "#eff6ff", authUser ? "#047857" : "#1d4ed8", 800)}>
+              {authUser ? copy.account.accountButtonSignedIn : copy.account.accountButton}
+            </button>
             <LanguageSwitch lang={lang} onChange={setLang} />
 
             {page === "editor" && tmpl && cvData && (
@@ -1934,7 +2402,7 @@ export default function App() {
               <button onClick={() => setEditMode(e => !e)} style={nb(editMode ? "#fcd34d" : "#e2e8f0", editMode ? "#fffbeb" : "#fff", editMode ? "#92400e" : "#374151", 700)}>
                 {editMode ? copy.header.preview : copy.header.edit}
               </button>
-              {editMode && <button onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 2000); }} style={nb(saved ? "#059669" : "#bbf7d0", saved ? "#059669" : "#f0fdf4", saved ? "#fff" : "#059669", 700)}>{saved ? copy.header.saved : copy.header.save}</button>}
+              {editMode && <button onClick={() => saveCurrentResume()} disabled={accountSaving} style={nb(saved ? "#059669" : "#bbf7d0", saved ? "#059669" : "#f0fdf4", saved ? "#fff" : "#059669", 700)}>{saved ? copy.header.saved : accountSaving ? copy.account.saving : copy.header.save}</button>}
               <button onClick={handleDownloadClick} disabled={exporting || startingCheckout}
                 style={{ padding: "7px 16px", borderRadius: 8, background: paidForCurrentDocument ? "linear-gradient(135deg,#059669,#0d9488)" : exporting || startingCheckout ? "#94a3b8" : `linear-gradient(135deg,${tmpl.color},#7c3aed)`, color: "#fff", border: "none", cursor: exporting || startingCheckout ? "not-allowed" : "pointer", fontWeight: 800, fontSize: 12.5, boxShadow: exporting || startingCheckout ? "none" : `0 3px 10px ${tmpl.color}44` }}>
                 {exporting ? copy.header.pdfLoading : startingCheckout ? copy.header.stripeLoading : paidForCurrentDocument ? copy.header.pdfPaid : copy.header.pdfLocked}

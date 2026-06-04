@@ -5,6 +5,11 @@ import bodyParser from "body-parser";
 import { sendPdfEmail } from "./utils/email.js";
 import { getStripeClient } from "./utils/stripe.js";
 import {
+  getSupabaseAdmin,
+  getSupabaseUserFromAuthorization,
+  isSupabaseConfigured,
+} from "./utils/supabase.js";
+import {
   createDocumentHash,
   createDownloadToken,
   type PdfSourcePayload,
@@ -46,6 +51,26 @@ function buildPdfPayload(source: Record<string, unknown>): PdfSourcePayload | nu
     photoDataUrl: typeof source.photoDataUrl === "string" ? source.photoDataUrl : "",
     cvData: source.cvData as PdfSourcePayload["cvData"],
   };
+}
+
+function getResumeTitle(payload: PdfSourcePayload): string {
+  return (
+    (typeof payload.cvData?.nume === "string" && payload.cvData.nume.trim()) ||
+    (typeof payload.cvData?.titlu === "string" && payload.cvData.titlu.trim()) ||
+    payload.templateName ||
+    "CV"
+  ).slice(0, 160);
+}
+
+function getCustomerEmailFromSession(session: any): string | null {
+  return (
+    session.customer_details?.email ||
+    (typeof session.customer_email === "string" ? session.customer_email : null)
+  );
+}
+
+function getCustomerNameFromSession(session: any): string | null {
+  return session.customer_details?.name || null;
 }
 
 async function emailPdfOnce({
@@ -129,6 +154,150 @@ async function generatePaidPdfFromPayload({
   return { pdfBuffer, filename };
 }
 
+async function savePendingPurchaseSnapshot({
+  userId,
+  resumeId,
+  session,
+  documentHash,
+  payload,
+}: {
+  userId: string | null;
+  resumeId: string | null;
+  session: any;
+  documentHash: string;
+  payload: PdfSourcePayload;
+}) {
+  const supabase = getSupabaseAdmin();
+
+  if (!supabase || !userId) {
+    return;
+  }
+
+  const { error } = await supabase.from("cv_purchases").upsert(
+    {
+      user_id: userId,
+      resume_id: resumeId,
+      stripe_session_id: session.id,
+      document_hash: documentHash,
+      pdf_payload: payload,
+      title: getResumeTitle(payload),
+      template_name: payload.templateName || "CV",
+      lang: payload.lang || "ro",
+      customer_email: typeof session.customer_email === "string" ? session.customer_email : null,
+      amount_total: session.amount_total ?? 1900,
+      currency: session.currency || "ron",
+      payment_status: "pending",
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "stripe_session_id" }
+  );
+
+  if (error) {
+    console.warn("Could not save pending purchase snapshot:", error.message);
+  }
+}
+
+async function markPurchasePaidAndEmail(session: any, documentHash: string | null) {
+  const supabase = getSupabaseAdmin();
+
+  if (!supabase || !documentHash || typeof session.id !== "string") {
+    return false;
+  }
+
+  const { data: purchase, error } = await supabase
+    .from("cv_purchases")
+    .select("*")
+    .eq("stripe_session_id", session.id)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Could not read purchase from Supabase:", error.message);
+    return false;
+  }
+
+  if (!purchase?.pdf_payload || purchase.document_hash !== documentHash) {
+    return false;
+  }
+
+  const paidAt = new Date().toISOString();
+  const { error: updateError } = await supabase
+    .from("cv_purchases")
+    .update({
+      payment_status: session.payment_status || "paid",
+      paid_at: purchase.paid_at || paidAt,
+      amount_total: session.amount_total ?? purchase.amount_total,
+      currency: session.currency || purchase.currency,
+      customer_email: getCustomerEmailFromSession(session) || purchase.customer_email,
+      customer_name: getCustomerNameFromSession(session) || purchase.customer_name,
+      updated_at: paidAt,
+    })
+    .eq("stripe_session_id", session.id);
+
+  if (updateError) {
+    console.warn("Could not mark purchase as paid:", updateError.message);
+  }
+
+  if (session.payment_status === "paid") {
+    await generatePaidPdfFromPayload({
+      session,
+      documentHash,
+      payload: purchase.pdf_payload as PdfSourcePayload,
+    });
+  }
+
+  return true;
+}
+
+async function findStoredPdfPayload(sessionId: string, documentHash: string) {
+  const memoryPayload = checkoutPdfPayloads.get(sessionId);
+
+  if (memoryPayload?.documentHash === documentHash) {
+    return memoryPayload.payload;
+  }
+
+  const supabase = getSupabaseAdmin();
+
+  if (!supabase) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("cv_purchases")
+    .select("document_hash, pdf_payload")
+    .eq("stripe_session_id", sessionId)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Could not read stored PDF payload:", error.message);
+    return null;
+  }
+
+  if (data?.document_hash !== documentHash || !data.pdf_payload) {
+    return null;
+  }
+
+  return data.pdf_payload as PdfSourcePayload;
+}
+
+async function requireAccountUser(
+  req: express.Request,
+  res: express.Response
+) {
+  if (!isSupabaseConfigured()) {
+    res.status(503).json({ error: "Account storage is not configured" });
+    return null;
+  }
+
+  const user = await getSupabaseUserFromAuthorization(req.headers.authorization);
+
+  if (!user) {
+    res.status(401).json({ error: "Authentication required" });
+    return null;
+  }
+
+  return user;
+}
+
 app.use(cors());
 
 // Healthcheck simplu pentru Render
@@ -172,6 +341,8 @@ app.post(
           : null;
       const storedPayload = sessionId ? checkoutPdfPayloads.get(sessionId) : null;
 
+      await markPurchasePaidAndEmail(session, documentHash);
+
       if (
         sessionId &&
         documentHash &&
@@ -204,6 +375,9 @@ app.post("/create-checkout", async (req, res) => {
     const frontendUrl = getFrontendUrl();
     const documentHash = req.body?.documentHash;
     const pdfPayload = buildPdfPayload(req.body ?? {});
+    const accountUser = await getSupabaseUserFromAuthorization(req.headers.authorization);
+    const resumeId =
+      accountUser && typeof req.body?.resumeId === "string" ? req.body.resumeId : null;
 
     if (
       typeof documentHash !== "string" ||
@@ -233,10 +407,13 @@ app.post("/create-checkout", async (req, res) => {
       ],
       success_url: `${frontendUrl}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${frontendUrl}/?payment=cancel`,
+      customer_email: accountUser?.email || undefined,
       metadata: {
         templateName: req.body?.templateName || "CV",
         lang: req.body?.lang || "ro",
         documentHash,
+        accountUserId: accountUser?.id || "",
+        resumeId: resumeId || "",
       },
     });
 
@@ -247,6 +424,14 @@ app.post("/create-checkout", async (req, res) => {
         documentHash,
         payload: pdfPayload,
         savedAt: Date.now(),
+      });
+
+      await savePendingPurchaseSnapshot({
+        userId: accountUser?.id || null,
+        resumeId,
+        session,
+        documentHash,
+        payload: pdfPayload,
       });
     }
 
@@ -386,9 +571,12 @@ app.post("/download-session-pdf", async (req, res) => {
 
     cleanupCheckoutPayloads();
 
-    const storedPayload = checkoutPdfPayloads.get(tokenPayload.sessionId);
+    const storedPayload = await findStoredPdfPayload(
+      tokenPayload.sessionId,
+      tokenPayload.documentHash
+    );
 
-    if (!storedPayload || storedPayload.documentHash !== tokenPayload.documentHash) {
+    if (!storedPayload) {
       return res.status(404).json({
         error: "The paid CV snapshot is no longer available on the server.",
       });
@@ -410,7 +598,7 @@ app.post("/download-session-pdf", async (req, res) => {
     const { pdfBuffer, filename } = await generatePaidPdfFromPayload({
       session,
       documentHash: tokenPayload.documentHash,
-      payload: storedPayload.payload,
+      payload: storedPayload,
     });
 
     res.setHeader("Cache-Control", "no-store");
@@ -420,6 +608,101 @@ app.post("/download-session-pdf", async (req, res) => {
     res.send(pdfBuffer);
   } catch (error) {
     console.error("Download session PDF error:", error);
+    res.status(500).json({ error: "Could not generate PDF" });
+  }
+});
+
+app.get("/account/purchases", async (req, res) => {
+  try {
+    const user = await requireAccountUser(req, res);
+    if (!user) return;
+
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return res.status(503).json({ error: "Account storage is not configured" });
+
+    const { data, error } = await supabase
+      .from("cv_purchases")
+      .select(
+        "id, resume_id, title, template_name, lang, amount_total, currency, paid_at, created_at, stripe_session_id, document_hash"
+      )
+      .eq("user_id", user.id)
+      .eq("payment_status", "paid")
+      .order("paid_at", { ascending: false, nullsFirst: false });
+
+    if (error) {
+      console.error("Account purchases error:", error);
+      return res.status(500).json({ error: "Could not load purchases" });
+    }
+
+    res.json({ purchases: data || [] });
+  } catch (error) {
+    console.error("Account purchases error:", error);
+    res.status(500).json({ error: "Could not load purchases" });
+  }
+});
+
+app.post("/account/download-purchase-pdf", async (req, res) => {
+  try {
+    const user = await requireAccountUser(req, res);
+    if (!user) return;
+
+    const purchaseId = req.body?.purchaseId;
+    if (typeof purchaseId !== "string") {
+      return res.status(400).json({ error: "Missing purchaseId" });
+    }
+
+    const supabase = getSupabaseAdmin();
+    if (!supabase) return res.status(503).json({ error: "Account storage is not configured" });
+
+    const { data: purchase, error } = await supabase
+      .from("cv_purchases")
+      .select("*")
+      .eq("id", purchaseId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Purchase download lookup error:", error);
+      return res.status(500).json({ error: "Could not load purchase" });
+    }
+
+    if (!purchase?.pdf_payload) {
+      return res.status(404).json({ error: "Purchase not found" });
+    }
+
+    if (purchase.payment_status !== "paid") {
+      return res.status(403).json({ error: "Payment not confirmed" });
+    }
+
+    const pdfPayload = purchase.pdf_payload as PdfSourcePayload;
+    const documentHash = createDocumentHash(pdfPayload);
+
+    if (documentHash !== purchase.document_hash) {
+      return res.status(409).json({ error: "Stored CV snapshot is invalid" });
+    }
+
+    const stripe = getStripeClient();
+    const session = await stripe.checkout.sessions.retrieve(purchase.stripe_session_id);
+
+    if (session.payment_status !== "paid") {
+      return res.status(403).json({ error: "Payment not confirmed" });
+    }
+
+    const { generatePdf } = await import("./utils/pdf.js");
+    const pdfBuffer = await generatePdf(pdfPayload);
+    const filename = sanitizeFilename(
+      `CV_${String(pdfPayload.cvData?.nume || pdfPayload.templateName || "CV")}_${String(
+        pdfPayload.lang || "ro"
+      ).toUpperCase()}.pdf`
+    );
+
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Length", pdfBuffer.length.toString());
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error("Account purchase download error:", error);
     res.status(500).json({ error: "Could not generate PDF" });
   }
 });
