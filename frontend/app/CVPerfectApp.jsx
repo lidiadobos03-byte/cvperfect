@@ -2311,7 +2311,7 @@ export default function App() {
         />
       )}
 
-      {accountOpen && (
+      {accountOpen && supabase && (
         <AccountModal
           lang={lang}
           user={authUser}
@@ -2364,9 +2364,11 @@ export default function App() {
           </div>
 
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <button onClick={() => setAccountOpen(true)} style={nb(authUser ? "#bbf7d0" : "#bfdbfe", authUser ? "#f0fdf4" : "#eff6ff", authUser ? "#047857" : "#1d4ed8", 800)}>
-              {authUser ? copy.account.accountButtonSignedIn : copy.account.accountButton}
-            </button>
+            {supabase && (
+              <button onClick={() => setAccountOpen(true)} style={nb(authUser ? "#bbf7d0" : "#bfdbfe", authUser ? "#f0fdf4" : "#eff6ff", authUser ? "#047857" : "#1d4ed8", 800)}>
+                {authUser ? copy.account.accountButtonSignedIn : copy.account.accountButton}
+              </button>
+            )}
             <LanguageSwitch lang={lang} onChange={setLang} />
 
             {page === "editor" && tmpl && cvData && (
