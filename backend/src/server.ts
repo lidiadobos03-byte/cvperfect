@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import bodyParser from "body-parser";
+import { sendPdfEmail } from "./utils/email.js";
 import { getStripeClient } from "./utils/stripe.js";
 import {
   createDocumentHash,
@@ -15,6 +16,7 @@ dotenv.config();
 const app = express();
 const getFrontendUrl = () =>
   (process.env.FRONTEND_URL || "https://cvperfect.online").replace(/\/+$/, "");
+const emailedDownloadKeys = new Set<string>();
 
 app.use(cors());
 
@@ -78,6 +80,7 @@ app.post("/create-checkout", async (req, res) => {
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
+      customer_creation: "always",
       line_items: [
         {
           price_data: {
@@ -206,6 +209,39 @@ app.post("/download-pdf", async (req, res) => {
         lang || "ro"
       ).toUpperCase()}.pdf`
     );
+    const customerEmail =
+      session.customer_details?.email ||
+      (typeof session.customer_email === "string" ? session.customer_email : null);
+    const customerName =
+      session.customer_details?.name ||
+      (typeof cvData?.nume === "string" ? cvData.nume : null);
+    const emailKey = `${session.id}:${documentHash}`;
+
+    if (customerEmail && !emailedDownloadKeys.has(emailKey)) {
+      emailedDownloadKeys.add(emailKey);
+      void sendPdfEmail({
+        to: customerEmail,
+        filename,
+        pdfBuffer,
+        customerName,
+        lang: typeof lang === "string" ? lang : null,
+      }).then((emailResult) => {
+        if (emailResult.status === "sent") {
+          console.log("PDF email sent:", { sessionId: session.id, to: customerEmail });
+          return;
+        }
+
+        console.warn("PDF email not sent:", {
+          sessionId: session.id,
+          to: customerEmail,
+          reason: emailResult.reason,
+        });
+
+        if (emailResult.status === "failed") {
+          emailedDownloadKeys.delete(emailKey);
+        }
+      });
+    }
 
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "application/pdf");

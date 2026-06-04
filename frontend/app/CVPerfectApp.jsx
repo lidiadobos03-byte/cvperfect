@@ -1942,7 +1942,7 @@ export default function App() {
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(288px, 1fr))", gap: 16 }}>
-            {designCatalog.map(design => <DesignCard key={design.id} design={design} onSelect={selected => selectDesign(selected, { preserveCurrent: false })} lang={lang} />)}
+            {designCatalog.map(design => <DesignCard key={design.id} design={design} onSelect={selectDesign} lang={lang} />)}
           </div>
         </div>
       )}

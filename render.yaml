@@ -30,5 +30,9 @@ services:
         sync: false
       - key: DOWNLOAD_TOKEN_SECRET
         sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
       - key: FRONTEND_URL
         value: https://cvperfect.online

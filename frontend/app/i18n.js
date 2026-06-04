@@ -105,7 +105,7 @@ const UI_COPY = {
       benefits: [
         "✅ PDF profesional format A4 european",
         "✅ Optimizat ATS — trecut prin filtre HR",
-        "✅ PDF generat securizat pe server după plată",
+        "✅ Descărcare instant + copie trimisă pe email",
         "✅ Plată securizată prin Stripe 🔒",
       ],
       openingStripe: "⏳ Se deschide Stripe...",
@@ -260,7 +260,7 @@ const UI_COPY = {
       benefits: [
         "✅ Professional European A4 PDF",
         "✅ ATS-friendly layout built for HR screening",
-        "✅ Secure server-side PDF generated after payment",
+        "✅ Instant download + email copy after payment",
         "✅ Secure payment powered by Stripe 🔒",
       ],
       openingStripe: "⏳ Opening Stripe...",

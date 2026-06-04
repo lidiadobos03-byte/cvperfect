@@ -45,9 +45,17 @@ Click pe **Environment → Add Environment Variable**:
 STRIPE_SECRET_KEY      = sk_live_CHEIA_TA
 STRIPE_WEBHOOK_SECRET  = whsec_SECRETUL_TAU
 DOWNLOAD_TOKEN_SECRET  = o-cheie-lunga-random-pentru-download
+RESEND_API_KEY         = re_CHEIA_TA_RESEND
+EMAIL_FROM             = CVPerfect <hello@domeniul-tau.ro>
 FRONTEND_URL           = https://cvperfect.online
 PORT                   = 4000
 ```
+
+Pentru email cu PDF atașat după plată:
+1. Creează cont pe **resend.com**
+2. Verifică domeniul/adresa de expeditor
+3. Copiază cheia API în `RESEND_API_KEY`
+4. Setează `EMAIL_FROM` cu adresa verificată, de exemplu `CVPerfect <hello@cvperfect.online>`
 
 ### 2c. Notează URL-ul backend-ului
 După deploy, Render îți dă un URL de forma:
@@ -105,6 +113,8 @@ cvperfect-backend.onrender.com (Render - Node.js)
 cvperfect.online?payment=success&session_id=xxx
     ↓ GET /verify-payment
     ↓ PDF deblocat ✅
+    ↓ POST /download-pdf
+    ↓ PDF descărcat în browser + trimis pe email
 ```
 
 ---
